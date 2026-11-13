@@ -18,11 +18,13 @@ ARGS=(-enable-kvm -machine q35 -cpu host -smp 4 -m 4G -name "Nexora Linux"
       -drive if=pflash,format=raw,readonly=on,file=$OVMF/OVMF_CODE.fd
       -drive if=pflash,format=raw,file=$VM/OVMF_VARS.fd
       -drive file=$IMG,format=raw,if=virtio,cache=writeback
-      -nic user,model=virtio-net-pci
-      -device virtio-rng-pci)
+      -nic user,model=virtio-net-pci,hostfwd=tcp:127.0.0.1:2222-:22
+      -device virtio-rng-pci
+      -device qemu-xhci -device usb-tablet
+      -qmp unix:$VM/qmp.sock,server=on,wait=off)
 
 if [ "${1:-}" = --headless ]; then
     exec qemu-system-x86_64 "${ARGS[@]}" -display none -serial file:$VM/serial.log -monitor none
 else
-    exec qemu-system-x86_64 "${ARGS[@]}" -device virtio-vga -display gtk -serial mon:stdio
+    exec qemu-system-x86_64 "${ARGS[@]}" -device virtio-vga,xres=1600,yres=900 -display gtk -serial mon:stdio
 fi

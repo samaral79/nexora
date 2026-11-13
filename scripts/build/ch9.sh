@@ -45,9 +45,10 @@ EOF
 KEYMAP=pt-latin1
 FONT=Lat2-Terminus16
 EOF
-    LC_ALL=pt_PT.UTF-8 locale charmap | grep -qx UTF-8
+    # sistema em inglês; teclado continua pt-latin1 e fuso Europe/Lisbon
+    LC_ALL=en_US.UTF-8 locale charmap | grep -qx UTF-8
     cat > /etc/locale.conf << "EOF"
-LANG=pt_PT.UTF-8
+LANG=en_US.UTF-8
 EOF
     cat > /etc/profile << "EOF"
 # Begin /etc/profile
@@ -105,12 +106,49 @@ EOF
 }
 
 s_systemd() {
-    # não limpar o ecrã no tty1 (vê-se o que o arranque disse)
-    mkdir -pv /etc/systemd/system/getty@tty1.service.d
-    cat > /etc/systemd/system/getty@tty1.service.d/noclear.conf << EOF
-[Service]
-TTYVTDisallocate=no
+    # o getty limpa o ecrã antes do login (ecrã de login limpo)
+    rm -rf /etc/systemd/system/getty@tty1.service.d
+    # mensagens do kernel não aparecem por cima do login (só erros a sério)
+    mkdir -pv /etc/sysctl.d
+    echo "kernel.printk = 3 3 3 3" > /etc/sysctl.d/10-console-messages.conf
+}
+
+s_bash() {
+    # ficheiros de arranque da bash (BLFS 'The Bash Shell Startup Files', simplificado)
+    cat >> /etc/profile << "EOF"
+
+# Nexora: profile.d, umask e bashrc
+umask 022
+for script in /etc/profile.d/*.sh ; do
+    [ -r "$script" ] && . "$script"
+done
+unset script
+[ -n "$BASH_VERSION" ] && [ -r /etc/bashrc ] && . /etc/bashrc
 EOF
+    mkdir -p /etc/profile.d
+    # utilizadores normais também com /usr/sbin no PATH (shutdown, reboot, ip...)
+    cat > /etc/profile.d/nexora-path.sh << "EOF"
+case ":$PATH:" in *:/usr/sbin:*) ;; *) PATH=$PATH:/usr/sbin ;; esac
+export PATH
+EOF
+    cat > /etc/bashrc << "EOF"
+# Begin /etc/bashrc (Nexora)
+[[ $- != *i* ]] && return
+alias ls='ls --color=auto'
+alias ll='ls -lh'
+alias la='ls -lAh'
+alias grep='grep --color=auto'
+if [[ $EUID -eq 0 ]]; then
+    PS1='\[\e[1;31m\]\u\[\e[0m\]@\[\e[1;36m\]\h\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]# '
+else
+    PS1='\[\e[1;32m\]\u\[\e[0m\]@\[\e[1;36m\]\h\[\e[0m\]:\[\e[1;34m\]\w\[\e[0m\]\$ '
+fi
+# End /etc/bashrc
+EOF
+    mkdir -p /etc/skel
+    printf '# ~/.bash_profile\n[ -r ~/.bashrc ] && . ~/.bashrc\n' > /etc/skel/.bash_profile
+    printf '# ~/.bashrc\n[ -r /etc/bashrc ] && . /etc/bashrc\n' > /etc/skel/.bashrc
+    cp /etc/skel/.bash_profile /etc/skel/.bashrc /root/
 }
 
 s_release() {
@@ -133,7 +171,10 @@ DISTRIB_CODENAME="nexora"
 DISTRIB_DESCRIPTION="Nexora Linux 13.1"
 EOF
     cat > /etc/issue << "EOF"
-\e[36mNexora Linux 13.1\e[0m  (\l)  kernel \r
+
+  \e{cyan}Welcome to Nexora Linux 13.1\e{reset}   (kernel \r on \l)
+
+  Type your username and press Enter (e.g. root).
 
 EOF
 }
@@ -143,5 +184,6 @@ step 9.2-network  s_network
 step 9.6-console  s_console
 step 9.8-inputrc  s_inputrc
 step 9.10-systemd s_systemd
+step 9.11-bash    s_bash
 step 11.1-release s_release
 echo "🎉 Capítulo 9 completo em $(( SECONDS - T0 ))s"

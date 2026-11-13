@@ -12,7 +12,14 @@ mkdir -p "$LOGS" "$DONE"
 
 _run() {
     local name=$1 fn=$2 t0=$SECONDS
-    if ( set -euo pipefail; $fn ) > "$LOGS/$name.log" 2>&1; then
+    # NÃO pôr o subshell como condição de um if: aí o bash ignora o set -e lá dentro
+    # e um passo a meio podia falhar sem ninguém dar por isso.
+    local rc=0
+    set +e
+    ( set -euo pipefail; $fn ) > "$LOGS/$name.log" 2>&1
+    rc=$?
+    set -e
+    if [ $rc -eq 0 ]; then
         touch "$DONE/$name"
         echo "✔  $name ($(( (SECONDS - t0) / 60 ))m$(( (SECONDS - t0) % 60 ))s)"
     else

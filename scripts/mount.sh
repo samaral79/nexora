@@ -3,6 +3,10 @@
 set -euo pipefail
 source "$(dirname "$0")/config.sh"
 mountpoint -q $LFS && { echo "$LFS já montado"; exit 0; }
+# nunca montar enquanto a VM usa o disco (estragava o ext4)
+if pgrep -f "qemu-system.*file=$IMG" >/dev/null; then
+    echo "A VM da Nexora está a correr. Desliga-a primeiro (poweroff ou ./scripts/vm-poweroff.sh)"; exit 1
+fi
 LOOP=$(losetup -j "$IMG" | cut -d: -f1 | head -1)
 [ -n "$LOOP" ] || LOOP=$(losetup -fP --show "$IMG")
 mkdir -p $LFS

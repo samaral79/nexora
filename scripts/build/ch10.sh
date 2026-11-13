@@ -53,9 +53,12 @@ p_kernel() {
        -e BLK_DEV_NVME -e EXT4_FS -e EXT4_FS_POSIX_ACL -e EXT4_FS_SECURITY \
        -e SERIAL_8250 -e SERIAL_8250_CONSOLE \
        -e AUTOFS_FS -e FANOTIFY -e SECCOMP -e BPF_SYSCALL -e CGROUP_BPF
+    # BLFS: llvmpipe precisa de VGEM; polkit/upower de user namespaces; libinput de evdev
+    $c -e DRM_VGEM -e NAMESPACES -e USER_NS -e INPUT_EVDEV -e INPUT_UINPUT \
+       -e SND -e SND_HDA_INTEL -e SND_HDA_CODEC_GENERIC -e HID_GENERIC -e USB_HID
     make olddefconfig
     # confirmar que o essencial ficou mesmo ligado
-    for o in DEVTMPFS DEVTMPFS_MOUNT EFI_STUB VIRTIO_BLK VIRTIO_PCI EXT4_FS VFAT_FS EFI_PARTITION CGROUPS; do
+    for o in DRM_VGEM USER_NS INPUT_EVDEV DEVTMPFS DEVTMPFS_MOUNT EFI_STUB VIRTIO_BLK VIRTIO_PCI EXT4_FS VFAT_FS EFI_PARTITION CGROUPS; do
         grep -qx "CONFIG_$o=y" .config || { echo "CONFIG_$o não ficou =y"; exit 1; }
     done
     make
@@ -82,7 +85,7 @@ s_grub() {
     cat > /boot/grub/grub.cfg << EOF
 # Begin /boot/grub/grub.cfg
 set default=0
-set timeout=5
+set timeout=3
 
 insmod part_gpt
 insmod ext2
@@ -91,7 +94,7 @@ search --no-floppy --label lfs-root --set=root
 set gfxpayload=keep
 
 menuentry "Nexora Linux 13.1 (Linux $KVER)" {
-        linux   /boot/$KNAME root=PARTUUID=$ROOT_PARTUUID ro console=ttyS0,115200 console=tty0
+        linux   /boot/$KNAME root=PARTUUID=$ROOT_PARTUUID ro quiet loglevel=3 console=ttyS0,115200 console=tty0
 }
 menuentry "Nexora Linux 13.1 (modo de recuperação)" {
         linux   /boot/$KNAME root=PARTUUID=$ROOT_PARTUUID ro console=ttyS0,115200 console=tty0 systemd.unit=rescue.target

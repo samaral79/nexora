@@ -25,10 +25,17 @@ else
     mountpoint -q $LFS/dev/shm || mount -vt tmpfs -o nosuid,nodev tmpfs $LFS/dev/shm
 fi
 
+# Fontes do BLFS (ficam no projeto, fora da imagem)
+mkdir -p $PROJ/sources-blfs $LFS/sources/blfs
+mountpoint -q $LFS/sources/blfs || mount --bind $PROJ/sources-blfs $LFS/sources/blfs
+# DNS dentro do chroot: só no /run (tmpfs), a imagem não é tocada
+mkdir -p $LFS/run/systemd/resolve
+cat /etc/resolv.conf > $LFS/run/systemd/resolve/stub-resolv.conf
+
 # Scripts de build visíveis lá dentro em /sources/nexora-build
 DEST=$LFS/sources/nexora-build
 mkdir -p $DEST
-cp "$(dirname "$0")"/build/*.sh $DEST/
+cp "$(dirname "$0")"/build/*.sh "$(dirname "$0")"/blfs/*.sh $DEST/
 
 ENV=(HOME=/root TERM="$TERM" PS1='(nexora chroot) \u:\w\$ '
      PATH=/usr/bin:/usr/sbin MAKEFLAGS="-j$(nproc)" TESTSUITEFLAGS="-j$(nproc)" LFS=)

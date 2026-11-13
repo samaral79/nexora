@@ -4,7 +4,8 @@
 D=/mnt/lfs/sources/.done
 L=/mnt/lfs/sources/.logs
 B=$(dirname "$0")/build
-FILES=$B/ch*.sh; [ -n "${1:-}" ] && FILES=$B/$1.sh
+FILES="$B/ch*.sh $(dirname "$0")/blfs/blfs-*.sh"
+if [ -n "${1:-}" ]; then FILES=$B/$1.sh; [ -f "$FILES" ] || FILES=$(dirname "$0")/blfs/$1.sh; fi
 mapfile -t ALL < <(awk '/^(pkg|step) /{print $2}' $FILES)
 ROWS=$(( $(tput lines 2>/dev/null || echo 40) - 12 ))
 while true; do

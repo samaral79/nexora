@@ -5,6 +5,7 @@ set -euo pipefail
 source "$(dirname "$0")/config.sh"
 [ "$EUID" -eq 0 ] || { echo "corre com sudo"; exit 1; }
 NAME=${1:?uso: $0 <nome>}
+mountpoint -q $LFS/sources/blfs && umount $LFS/sources/blfs
 mountpoint -q $LFS/dev/shm && umount $LFS/dev/shm
 mountpoint -q $LFS/dev/pts && umount $LFS/dev/pts
 for d in sys proc run dev; do mountpoint -q $LFS/$d && umount $LFS/$d; done
