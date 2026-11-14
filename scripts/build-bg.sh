@@ -2,6 +2,7 @@
 # Corre capítulos de build como serviço do systemd (root), fora do terminal e com teto de memória:
 # se a RAM apertar, morre o compilador e não o ambiente de trabalho do Fedora.
 # Uso: sudo ./scripts/build-bg.sh blfs-b ch10 blfs-c     (segue com: journalctl -fu nexora-build)
+#      sudo NX_JOBS=6 ./scripts/build-bg.sh ...          (menos jobs quando o PC está ocupado, p.ex. a jogar)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 [ "$EUID" -eq 0 ] || { echo "corre com sudo"; exit 1; }
@@ -13,6 +14,6 @@ CHAIN+="echo '🏁 cadeia completa: $*'"
 systemd-run --unit=nexora-build --collect \
     -p MemoryHigh=10500M -p MemoryMax=11500M -p MemorySwapMax=2G -p OOMScoreAdjust=900 \
     -p Nice=5 -p IOSchedulingClass=idle \
-    -E TERM=xterm-256color \
+    -E TERM=xterm-256color -E NX_JOBS="${NX_JOBS:-$(nproc)}" \
     /bin/bash -c "$CHAIN"
 echo "▶ a correr em fundo. Ver: journalctl -fu nexora-build   |   parar: sudo systemctl stop nexora-build"

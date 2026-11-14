@@ -13,9 +13,9 @@ import threading
 
 import locale
 
-# o instalador é em português (os botões do GTK também), seja qual for o idioma do live
-os.environ["LANGUAGE"] = "pt_PT:pt"
-for _loc in ("pt_PT.UTF-8", "pt_PT.utf8", "C.UTF-8"):
+# o instalador é em inglês (os botões do GTK também), seja qual for o idioma do live
+os.environ["LANGUAGE"] = "en_US:en"
+for _loc in ("en_US.UTF-8", "en_US.utf8", "C.UTF-8"):
     try:
         locale.setlocale(locale.LC_ALL, _loc)
         break
@@ -30,25 +30,25 @@ ENGINE = "/usr/sbin/nexora-install-engine"
 LOGO = "/usr/share/icons/hicolor/scalable/apps/nexora.svg"
 
 KEYMAPS = [  # (nome, KEYMAP da consola, layout X)
-    ("Português (Portugal)", "pt-latin1", "pt"),
-    ("Português (Brasil)", "br-abnt2", "br"),
+    ("Portuguese (Portugal)", "pt-latin1", "pt"),
+    ("Portuguese (Brazil)", "br-abnt2", "br"),
     ("English (US)", "us", "us"),
     ("English (UK)", "uk", "gb"),
-    ("Español", "es", "es"),
-    ("Français", "fr-latin1", "fr"),
-    ("Deutsch", "de-latin1", "de"),
+    ("Spanish", "es", "es"),
+    ("French", "fr-latin1", "fr"),
+    ("German", "de-latin1", "de"),
 ]
 DESKTOPS = [  # (nome, valor para o motor)
-    ("Nexora Flow (Wayland) — janelas numa fita, o ambiente da Nexora", "flow"),
-    ("Xfce (clássico) — barra em cima e doca, como no live", "xfce"),
+    ("Nexora Flow (Wayland) — scrolling windows, the Nexora desktop", "flow"),
+    ("Xfce (classic) — top bar and dock, like the live session", "xfce"),
 ]
 LOCALES = [
     ("English", "en_US.UTF-8"),
-    ("Português (Portugal)", "pt_PT.UTF-8"),
-    ("Português (Brasil)", "pt_BR.UTF-8"),
-    ("Español", "es_ES.UTF-8"),
-    ("Français", "fr_FR.UTF-8"),
-    ("Deutsch", "de_DE.UTF-8"),
+    ("Portuguese (Portugal)", "pt_PT.UTF-8"),
+    ("Portuguese (Brazil)", "pt_BR.UTF-8"),
+    ("Spanish", "es_ES.UTF-8"),
+    ("French", "fr_FR.UTF-8"),
+    ("German", "de_DE.UTF-8"),
 ]
 
 CSS = b"""
@@ -113,7 +113,7 @@ def zones():
 
 class Installer(Gtk.Assistant):
     def __init__(self):
-        super().__init__(title="Instalar a Nexora Linux")
+        super().__init__(title="Install Nexora Linux")
         self.set_default_size(820, 560)
         self.set_position(Gtk.WindowPosition.CENTER)
         if os.path.exists(LOGO):
@@ -162,13 +162,13 @@ class Installer(Gtk.Assistant):
             img = Gtk.Image.new_from_pixbuf(
                 __import__("gi.repository.GdkPixbuf", fromlist=["GdkPixbuf"]).Pixbuf.new_from_file_at_size(LOGO, 112, 112))
             b.pack_start(img, False, False, 0)
-        b.pack_start(self.label("Bem-vindo à Nexora Linux", "nx-title", xalign=0.5), False, False, 0)
+        b.pack_start(self.label("Welcome to Nexora Linux", "nx-title", xalign=0.5), False, False, 0)
         b.pack_start(self.label(
-            "Este assistente instala a Nexora no teu computador. Vais escolher a região e o teclado, "
-            "o disco e o teu utilizador. Leva uns minutos.", "nx-big", xalign=0.5), False, False, 0)
-        b.pack_start(self.label("Atenção: o disco que escolheres vai ser apagado por completo.",
+            "This assistant installs Nexora on your computer. You will pick your desktop, region and "
+            "keyboard, the disk and your user account. It only takes a few minutes.", "nx-big", xalign=0.5), False, False, 0)
+        b.pack_start(self.label("Warning: the disk you choose will be completely erased.",
                                 "nx-warn", xalign=0.5), False, False, 0)
-        self.add(b, "Bem-vindo", Gtk.AssistantPageType.INTRO)
+        self.add(b, "Welcome", Gtk.AssistantPageType.INTRO)
 
     def combo(self, items, active=0):
         c = Gtk.ComboBoxText()
@@ -179,7 +179,7 @@ class Installer(Gtk.Assistant):
 
     def page_region(self):
         b = self.box()
-        b.pack_start(self.label("Ambiente, região e teclado", "nx-title"), False, False, 0)
+        b.pack_start(self.label("Desktop, region and keyboard", "nx-title"), False, False, 0)
         g = Gtk.Grid(column_spacing=16, row_spacing=12)
         self.zone_list = zones()
         self.c_zone = self.combo(self.zone_list,
@@ -187,23 +187,23 @@ class Installer(Gtk.Assistant):
         self.c_kbd = self.combo([k[0] for k in KEYMAPS], 0)
         self.c_loc = self.combo([l[0] for l in LOCALES], 0)
         self.c_desk = self.combo([d[0] for d in DESKTOPS], 0)
-        for i, (name, w) in enumerate((("Ambiente de trabalho", self.c_desk), ("Fuso horário", self.c_zone),
-                                       ("Teclado", self.c_kbd), ("Idioma do sistema", self.c_loc))):
+        for i, (name, w) in enumerate((("Desktop", self.c_desk), ("Time zone", self.c_zone),
+                                       ("Keyboard", self.c_kbd), ("System language", self.c_loc))):
             g.attach(self.label(name), 0, i, 1, 1)
             w.set_hexpand(True)
             g.attach(w, 1, i, 1, 1)
         b.pack_start(g, False, False, 0)
-        test = Gtk.Entry(placeholder_text="Experimenta o teclado aqui (o teste usa o teclado atual)")
+        test = Gtk.Entry(placeholder_text="Type here to test the keyboard (uses the current layout)")
         b.pack_start(test, False, False, 0)
-        self.add(b, "Região")
+        self.add(b, "Region")
 
     def page_disk(self):
         b = self.box()
-        b.pack_start(self.label("Onde instalar?", "nx-title"), False, False, 0)
-        b.pack_start(self.label("Escolhe o disco. Tudo o que lá estiver será apagado.", "nx-warn"), False, False, 0)
+        b.pack_start(self.label("Where to install?", "nx-title"), False, False, 0)
+        b.pack_start(self.label("Pick a disk. Everything on it will be erased.", "nx-warn"), False, False, 0)
         self.disk_store = Gtk.ListStore(str, str, str, str)  # path, modelo, tamanho, ligação
         tv = Gtk.TreeView(model=self.disk_store)
-        for i, t in enumerate(("Disco", "Modelo", "Tamanho", "Ligação")):
+        for i, t in enumerate(("Disk", "Model", "Size", "Bus")):
             r = Gtk.CellRendererText()
             if i == 1:
                 r.set_property("ellipsize", Pango.EllipsizeMode.END)
@@ -218,11 +218,11 @@ class Installer(Gtk.Assistant):
         b.pack_start(sw, True, True, 0)
         self.disk_note = self.label("", "nx-dim")
         b.pack_start(self.disk_note, False, False, 0)
-        rb = Gtk.Button(label="Atualizar lista")
+        rb = Gtk.Button(label="Refresh")
         rb.connect("clicked", lambda *_: self.fill_disks())
         rb.set_halign(Gtk.Align.START)
         b.pack_start(rb, False, False, 0)
-        self.p_disk = self.add(b, "Disco", complete=False)
+        self.p_disk = self.add(b, "Disk", complete=False)
         self.fill_disks()
 
     def fill_disks(self):
@@ -231,7 +231,7 @@ class Installer(Gtk.Assistant):
             self.disk_store.append([d["path"], (d.get("model") or "").strip() or "—",
                                     human(int(d["size"])), (d.get("tran") or "").upper()])
         self.disk_note.set_text("" if len(self.disk_store) else
-                                "Não encontrei nenhum disco com pelo menos 8 GB (fora o do live).")
+                                "No disk with at least 8 GB found (besides the live medium).")
         self.set_page_complete(self.p_disk, False)
 
     def on_disk_changed(self, sel):
@@ -242,15 +242,15 @@ class Installer(Gtk.Assistant):
 
     def page_user(self):
         b = self.box()
-        b.pack_start(self.label("O teu utilizador", "nx-title"), False, False, 0)
+        b.pack_start(self.label("Your account", "nx-title"), False, False, 0)
         g = Gtk.Grid(column_spacing=16, row_spacing=12)
-        self.e_name = Gtk.Entry(placeholder_text="ex.: Lourenço Amaral")
-        self.e_user = Gtk.Entry(placeholder_text="ex.: lori")
+        self.e_name = Gtk.Entry(placeholder_text="e.g. Alex Silva")
+        self.e_user = Gtk.Entry(placeholder_text="e.g. alex")
         self.e_host = Gtk.Entry(text="nexora")
         self.e_pw1 = Gtk.Entry(visibility=False, input_purpose=Gtk.InputPurpose.PASSWORD)
         self.e_pw2 = Gtk.Entry(visibility=False, input_purpose=Gtk.InputPurpose.PASSWORD)
-        rows = (("Nome", self.e_name), ("Nome de utilizador", self.e_user), ("Nome do computador", self.e_host),
-                ("Senha", self.e_pw1), ("Repetir a senha", self.e_pw2))
+        rows = (("Full name", self.e_name), ("Username", self.e_user), ("Computer name", self.e_host),
+                ("Password", self.e_pw1), ("Confirm password", self.e_pw2))
         for i, (n, w) in enumerate(rows):
             g.attach(self.label(n), 0, i, 1, 1)
             w.set_hexpand(True)
@@ -260,9 +260,9 @@ class Installer(Gtk.Assistant):
         b.pack_start(g, False, False, 0)
         self.user_msg = self.label("", "nx-warn")
         b.pack_start(self.user_msg, False, False, 0)
-        b.pack_start(self.label("A tua conta fica com permissões de administrador (sudo). "
-                                "A conta root fica bloqueada.", "nx-dim"), False, False, 0)
-        self.p_user = self.add(b, "Utilizador", complete=False)
+        b.pack_start(self.label("Your account gets administrator rights (sudo). "
+                                "The root account is locked.", "nx-dim"), False, False, 0)
+        self.p_user = self.add(b, "Account", complete=False)
         self.user_touched = False
         self.e_user.connect("key-press-event", lambda *_: setattr(self, "user_touched", True))
 
@@ -280,58 +280,58 @@ class Installer(Gtk.Assistant):
         p1, p2 = self.e_pw1.get_text(), self.e_pw2.get_text()
         msg = ""
         if not self.e_name.get_text().strip():
-            msg = "Escreve o teu nome."
+            msg = "Enter your name."
         elif not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", u):
-            msg = "O nome de utilizador só pode ter minúsculas, números, - e _ (e começar por letra)."
+            msg = "The username may only contain lowercase letters, digits, - and _ (and must start with a letter)."
         elif u in ("root", "nexora", "bin", "daemon", "nobody"):
-            msg = f"O nome '{u}' está reservado."
+            msg = f"The name '{u}' is reserved."
         elif not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]{0,62}", h):
-            msg = "O nome do computador só pode ter letras, números e -."
+            msg = "The computer name may only contain letters, digits and -."
         elif len(p1) < 4:
-            msg = "A senha tem de ter pelo menos 4 caracteres."
+            msg = "The password must be at least 4 characters."
         elif p1 != p2:
-            msg = "As senhas não coincidem."
+            msg = "The passwords do not match."
         self.user_msg.set_text(msg)
         self.set_page_complete(self.p_user, not msg)
 
     def page_summary(self):
         b = self.box()
-        b.pack_start(self.label("Pronto para instalar", "nx-title"), False, False, 0)
+        b.pack_start(self.label("Ready to install", "nx-title"), False, False, 0)
         self.summary = self.label("", "nx-big", markup=True)
         b.pack_start(self.summary, False, False, 0)
-        b.pack_start(self.label("Ao carregar em Instalar, o disco escolhido é apagado. Não há volta atrás.",
+        b.pack_start(self.label("Clicking Install erases the chosen disk. This cannot be undone.",
                                 "nx-warn"), False, False, 0)
-        self.p_summary = self.add(b, "Resumo", Gtk.AssistantPageType.CONFIRM)
+        self.p_summary = self.add(b, "Summary", Gtk.AssistantPageType.CONFIRM)
 
     def page_progress(self):
         b = self.box()
-        b.pack_start(self.label("A instalar a Nexora…", "nx-title"), False, False, 0)
-        self.p_step = self.label("A começar…", "nx-big")
+        b.pack_start(self.label("Installing Nexora…", "nx-title"), False, False, 0)
+        self.p_step = self.label("Starting…", "nx-big")
         b.pack_start(self.p_step, False, False, 0)
         self.bar = Gtk.ProgressBar(show_text=True)
         b.pack_start(self.bar, False, False, 0)
-        exp = Gtk.Expander(label="Detalhes")
+        exp = Gtk.Expander(label="Details")
         self.logview = Gtk.TextView(editable=False, monospace=True, wrap_mode=Gtk.WrapMode.WORD_CHAR)
         sw = Gtk.ScrolledWindow(min_content_height=200)
         sw.add(self.logview)
         exp.add(sw)
         b.pack_start(exp, True, True, 0)
-        self.p_progress = self.add(b, "Instalação", Gtk.AssistantPageType.PROGRESS, complete=False)
+        self.p_progress = self.add(b, "Installing", Gtk.AssistantPageType.PROGRESS, complete=False)
 
     def page_finish(self):
         b = self.box()
         b.set_valign(Gtk.Align.CENTER)
-        self.fin_title = self.label("A Nexora está instalada! 🎉", "nx-title", xalign=0.5)
-        self.fin_text = self.label("Tira a pen ou o DVD e reinicia para entrares no teu sistema novo.",
+        self.fin_title = self.label("Nexora is installed! 🎉", "nx-title", xalign=0.5)
+        self.fin_text = self.label("Remove the USB stick or DVD and restart to enter your new system.",
                                    "nx-big", xalign=0.5)
         b.pack_start(self.fin_title, False, False, 0)
         b.pack_start(self.fin_text, False, False, 0)
-        self.btn_reboot = Gtk.Button(label="Reiniciar agora")
+        self.btn_reboot = Gtk.Button(label="Restart now")
         self.btn_reboot.get_style_context().add_class("suggested-action")
         self.btn_reboot.set_halign(Gtk.Align.CENTER)
         self.btn_reboot.connect("clicked", lambda *_: subprocess.Popen(["systemctl", "reboot"]))
         b.pack_start(self.btn_reboot, False, False, 0)
-        self.p_finish = self.add(b, "Fim", Gtk.AssistantPageType.SUMMARY)
+        self.p_finish = self.add(b, "Done", Gtk.AssistantPageType.SUMMARY)
 
     # ------------------------------------------------------------ lógica
     def choices(self):
@@ -347,19 +347,19 @@ class Installer(Gtk.Assistant):
             c = self.choices()
             esc = GLib.markup_escape_text
             self.summary.set_markup(
-                f"<b>Disco:</b> {esc(self.disk_desc)}\n"
-                f"<b>Utilizador:</b> {esc(c['FULLNAME'])} ({esc(c['USERNAME'])})\n"
-                f"<b>Computador:</b> {esc(c['HOSTNAME'])}\n"
-                f"<b>Ambiente:</b> {esc(c['_desk'].split(' — ')[0])}\n"
-                f"<b>Fuso horário:</b> {esc(c['TIMEZONE'])}\n"
-                f"<b>Teclado:</b> {esc(c['_kbd'])}   <b>Idioma:</b> {esc(c['_loc'])}")
-            # o botão de confirmar passa a dizer "Instalar"
+                f"<b>Disk:</b> {esc(self.disk_desc)}\n"
+                f"<b>User:</b> {esc(c['FULLNAME'])} ({esc(c['USERNAME'])})\n"
+                f"<b>Computer:</b> {esc(c['HOSTNAME'])}\n"
+                f"<b>Desktop:</b> {esc(c['_desk'].split(' — ')[0])}\n"
+                f"<b>Time zone:</b> {esc(c['TIMEZONE'])}\n"
+                f"<b>Keyboard:</b> {esc(c['_kbd'])}   <b>Language:</b> {esc(c['_loc'])}")
+            # o botão de confirmar passa a dizer "Install"
             GLib.idle_add(self.relabel_apply)
 
     def relabel_apply(self):
         def walk(w):
             if isinstance(w, Gtk.Button) and w.get_label() in ("_Apply", "Apply", "_Aplicar", "Aplicar"):
-                w.set_label("Instalar")
+                w.set_label("Install")
                 w.get_style_context().add_class("destructive-action")
             if isinstance(w, Gtk.Container):
                 for ch in w.get_children():
@@ -419,7 +419,7 @@ class Installer(Gtk.Assistant):
         if line.startswith("STEP "):
             parts = line.split(" ", 3)
             if len(parts) == 4:
-                self.p_step.set_text(f"Passo {parts[1]} de {parts[2]}: {parts[3]}")
+                self.p_step.set_text(f"Step {parts[1]} of {parts[2]}: {parts[3]}")
         buf.insert(buf.get_end_iter(), line + "\n")
         self.logview.scroll_to_iter(buf.get_end_iter(), 0, False, 0, 0)
         return False
@@ -428,8 +428,8 @@ class Installer(Gtk.Assistant):
         self.installing = False
         self.done = True
         if not ok:
-            self.fin_title.set_text("A instalação falhou")
-            self.fin_text.set_text((err or "Erro desconhecido.") + "\nVê os detalhes na página anterior.")
+            self.fin_title.set_text("Installation failed")
+            self.fin_text.set_text((err or "Unknown error.") + "\nSee the details on the previous page.")
             self.btn_reboot.hide()
         self.set_page_complete(self.p_progress, True)
         self.next_page()

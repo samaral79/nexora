@@ -1,0 +1,402 @@
+// Nexora Build — a janela do monitor do build (Slint, render por software: sem GPU, pouca RAM).
+import { ScrollView, ListView } from "std-widgets.slint";
+
+export struct PhaseRow { label: string, done: int, total: int, active: bool }
+export struct MeterData { frac: float, text: string, warn: bool }
+export struct PkgRow { header: bool, sym: string, col: color, name: string, phase: string, dur: string, id: string, expanded: bool }
+
+global T {
+    out property <color> bg: #0b1016;
+    out property <color> card: #111922;
+    out property <color> border: #1e2935;
+    out property <color> text: #e6edf3;
+    out property <color> soft: #c3ccd5;
+    out property <color> dim: #8593a1;
+    out property <color> accent: #22b8cf;
+    out property <color> green: #3fb950;
+    out property <color> red: #e5534b;
+    out property <color> amber: #d29922;
+    out property <color> track: #ffffff1c;
+    out property <color> logbg: #080c11;
+}
+
+component Card inherits Rectangle {
+    in property <string> title;
+    background: T.card;
+    border-radius: 10px;
+    border-width: 1px;
+    border-color: T.border;
+    VerticalLayout {
+        padding-top: 12px;
+        padding-bottom: 12px;
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 8px;
+        Text { text: root.title; color: T.dim; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+        @children
+    }
+}
+
+component Bar inherits Rectangle {
+    in property <float> frac;
+    in property <color> fill: T.accent;
+    height: 6px;
+    border-radius: self.height / 2;
+    background: T.track;
+    Rectangle {
+        x: 0;
+        y: 0;
+        height: parent.height;
+        width: parent.width * max(0, min(1, root.frac));
+        border-radius: parent.border-radius;
+        background: root.fill;
+    }
+}
+
+component Meter inherits VerticalLayout {
+    in property <string> label;
+    in property <MeterData> m;
+    spacing: 4px;
+    HorizontalLayout {
+        Text { text: root.label; color: T.soft; horizontal-stretch: 1; }
+        Text { text: root.m.text; color: T.dim; horizontal-stretch: 0; }
+    }
+    Bar { frac: root.m.frac; fill: root.m.warn ? T.amber : T.accent; }
+}
+
+component PhaseItem inherits VerticalLayout {
+    in property <PhaseRow> ph;
+    spacing: 3px;
+    padding-top: 3px;
+    padding-bottom: 3px;
+    padding-right: 14px;
+    HorizontalLayout {
+        spacing: 6px;
+        Text {
+            text: root.ph.label;
+            color: root.ph.active ? T.text : T.soft;
+            font-weight: root.ph.active ? 700 : 400;
+            horizontal-stretch: 1;
+            overflow: elide;
+        }
+        Text { text: root.ph.done + "/" + root.ph.total; color: T.dim; horizontal-stretch: 0; }
+    }
+    Bar {
+        height: 5px;
+        frac: root.ph.total > 0 ? root.ph.done / root.ph.total : 0;
+        fill: (root.ph.total > 0 && root.ph.done == root.ph.total) ? T.green : T.accent;
+    }
+}
+
+component NxButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary;
+    in property <bool> enabled: true;
+    callback clicked;
+    height: 32px;
+    min-width: bt.preferred-width + 30px;
+    border-radius: 8px;
+    opacity: root.enabled ? 1 : 0.45;
+    background: root.primary
+        ? (ba.pressed ? #1a9db1 : (ba.has-hover && root.enabled ? #2cc6dd : T.accent))
+        : (ba.pressed ? #ffffff1f : (ba.has-hover && root.enabled ? #ffffff17 : #ffffff0e));
+    border-width: root.primary ? 0 : 1px;
+    border-color: T.border;
+    bt := Text { text: root.text; color: root.primary ? #04161a : T.text; font-weight: root.primary ? 700 : 500; }
+    ba := TouchArea { enabled: root.enabled; mouse-cursor: pointer; clicked => { root.clicked(); } }
+}
+
+component NxCheck inherits Rectangle {
+    in property <string> text;
+    in-out property <bool> checked;
+    min-width: cl.preferred-width;
+    cl := HorizontalLayout {
+        spacing: 8px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 18px;
+                height: 18px;
+                border-radius: 5px;
+                background: root.checked ? T.accent : transparent;
+                border-width: root.checked ? 0 : 1.5px;
+                border-color: T.dim;
+                Text { text: root.checked ? "✓" : ""; color: #04161a; font-weight: 800; font-size: 12px; }
+            }
+        }
+        Text { text: root.text; color: T.soft; vertical-alignment: center; }
+    }
+    TouchArea { mouse-cursor: pointer; clicked => { root.checked = !root.checked; } }
+}
+
+component TabBtn inherits Rectangle {
+    in property <string> label;
+    in property <bool> selected;
+    callback clicked;
+    height: 30px;
+    width: tb-t.preferred-width + 26px;
+    border-radius: 8px;
+    background: root.selected ? #22b8cf26 : (ta.has-hover ? #ffffff10 : transparent);
+    tb-t := Text { text: root.label; color: root.selected ? T.accent : T.dim; font-weight: 600; }
+    ta := TouchArea { clicked => { root.clicked(); } }
+}
+
+export component AppWindow inherits Window {
+    title: "Nexora Build";
+    icon: root.win-icon;
+    preferred-width: 1180px;
+    preferred-height: 760px;
+    min-width: 920px;
+    min-height: 600px;
+    background: T.bg;
+    default-font-size: 13px;
+
+    in property <image> win-icon: @image-url("../nexora.svg");
+    in property <string> subtitle;
+    in property <string> clock;
+    in property <string> status: "Parado";
+    in property <color> status-color: #8b949e;
+    in property <int> n-done;
+    in property <int> n-total;
+    in property <[PhaseRow]> phases;
+    in property <MeterData> m-build;
+    in property <MeterData> m-ram;
+    in property <MeterData> m-swap;
+    in property <MeterData> m-disk;
+    in property <string> cpu-text;
+    in property <string> cur-spin;
+    in property <color> cur-spin-color: T.accent;
+    in property <string> cur-name: "—";
+    in property <string> cur-time;
+    in property <string> cur-info;
+    in property <string> log-title;
+    in property <string> log-text;
+    in property <string> mono-font: "monospace";
+    in-out property <bool> follow: true;
+    in property <bool> picked;
+    in property <[PkgRow]> pkgs;
+    in property <bool> active;
+    in property <string> hint;
+    in-out property <int> tab: 0;
+    in property <bool> dlg-visible;
+    in property <string> dlg-title;
+    in property <string> dlg-text;
+    in property <bool> dlg-ok-only;
+
+    callback open-log();
+    callback open-folder();
+    callback stop();
+    callback resume();
+    callback back();
+    callback pick(string);
+    callback toggle-phase(string);
+    callback dlg-answer(bool);
+    callback tray-toggle();
+    callback tray-quit();
+
+    public function scroll-log-end() {
+        log-sv.content-y = min(0px, log-sv.visible-height - log-sv.content-height);
+    }
+
+    VerticalLayout {
+        padding-left: 18px;
+        padding-right: 18px;
+        padding-top: 14px;
+        padding-bottom: 14px;
+        spacing: 12px;
+
+        // topo
+        HorizontalLayout {
+            spacing: 12px;
+            Image { source: @image-url("../nexora.svg"); width: 40px; height: 40px; }
+            VerticalLayout {
+                alignment: center;
+                Text { text: "Nexora Linux"; color: T.text; font-size: 22px; font-weight: 700; }
+                Text { text: root.subtitle; color: T.dim; }
+            }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: root.clock; color: T.dim; vertical-alignment: center; }
+            VerticalLayout {
+                alignment: center;
+                Rectangle {
+                    height: 26px;
+                    width: pill-t.preferred-width + 28px;
+                    border-radius: 13px;
+                    background: root.status-color;
+                    pill-t := Text { text: root.status; color: white; font-weight: 700; }
+                }
+            }
+        }
+
+        // progresso total
+        Rectangle {
+            height: 26px;
+            border-radius: 8px;
+            background: T.track;
+            clip: true;
+            Rectangle {
+                x: 0;
+                y: 0;
+                height: parent.height;
+                width: parent.width * (root.n-total > 0 ? root.n-done / root.n-total : 0);
+                background: @linear-gradient(90deg, #1098ad 0%, #22b8cf 100%);
+            }
+            Text {
+                text: root.n-done + " / " + root.n-total + " pacotes · "
+                    + (root.n-total > 0 ? floor(root.n-done * 100 / root.n-total) : 0) + "%";
+                color: white;
+                font-weight: 700;
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 12px;
+            vertical-stretch: 1;
+
+            // esquerda: fases + recursos
+            VerticalLayout {
+                width: 330px;
+                spacing: 12px;
+                Card {
+                    title: "FASES";
+                    vertical-stretch: 1;
+                    ListView {
+                        for p in root.phases: PhaseItem { ph: p; }
+                    }
+                }
+                Card {
+                    title: "RECURSOS";
+                    vertical-stretch: 0;
+                    Meter { label: "Memória do build"; m: root.m-build; }
+                    Meter { label: "RAM do PC"; m: root.m-ram; }
+                    Meter { label: "Swap"; m: root.m-swap; }
+                    Meter { label: "Disco da imagem"; m: root.m-disk; }
+                    Text { text: root.cpu-text; color: T.dim; }
+                }
+            }
+
+            // direita: pacote atual + log/pacotes
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 10px;
+                Card {
+                    title: "A COMPILAR AGORA";
+                    HorizontalLayout {
+                        spacing: 10px;
+                        Text { text: root.cur-spin; color: root.cur-spin-color; font-size: 20px; min-width: 24px; vertical-alignment: center; }
+                        Text { text: root.cur-name; color: T.text; font-size: 20px; font-weight: 600; horizontal-stretch: 1; overflow: elide; vertical-alignment: center; }
+                        Text { text: root.cur-time; color: T.dim; font-size: 17px; vertical-alignment: center; }
+                    }
+                    Text { text: root.cur-info; color: T.dim; wrap: word-wrap; }
+                }
+
+                HorizontalLayout {
+                    spacing: 6px;
+                    TabBtn { label: "Log ao vivo"; selected: root.tab == 0; clicked => { root.tab = 0; } }
+                    TabBtn { label: "Pacotes"; selected: root.tab == 1; clicked => { root.tab = 1; } }
+                    Rectangle { horizontal-stretch: 1; }
+                    Text { text: root.tab == 0 ? root.log-title : ""; color: T.dim; vertical-alignment: center; overflow: elide; }
+                    if root.picked && root.tab == 0: NxButton { text: "Voltar ao atual"; clicked => { root.back(); } }
+                    if root.tab == 0: NxCheck { text: "Seguir o fim"; checked <=> root.follow; }
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                    background: T.logbg;
+                    border-radius: 8px;
+                    border-width: 1px;
+                    border-color: T.border;
+                    clip: true;
+
+                    log-sv := ScrollView {
+                        visible: root.tab == 0;
+                        x: 0;
+                        y: 0;
+                        width: parent.width;
+                        height: parent.height;
+                        content-width: max(self.visible-width, log-t.preferred-width + 24px);
+                        content-height: max(self.visible-height, log-t.preferred-height + 20px);
+                        log-t := Text {
+                            x: 12px;
+                            y: 10px;
+                            width: self.preferred-width;
+                            height: self.preferred-height;
+                            text: root.log-text;
+                            font-family: root.mono-font;
+                            font-size: 12px;
+                            color: #c9d1d9;
+                            wrap: no-wrap;
+                        }
+                    }
+
+                    ListView {
+                        visible: root.tab == 1;
+                        x: 0;
+                        y: 0;
+                        width: parent.width;
+                        height: parent.height;
+                        for r in root.pkgs: Rectangle {
+                            height: 27px;
+                            background: r.header ? #ffffff08 : (pta.has-hover ? #ffffff0c : transparent);
+                            pta := TouchArea {
+                                clicked => { if (r.header) { root.toggle-phase(r.id); } }
+                                double-clicked => { if (!r.header) { root.pick(r.id); } }
+                            }
+                            HorizontalLayout {
+                                padding-left: r.header ? 10px : 34px;
+                                padding-right: 14px;
+                                spacing: 8px;
+                                Text { width: 12px; text: r.header ? (r.expanded ? "▾" : "▸") : ""; color: T.dim; vertical-alignment: center; }
+                                Text { width: 16px; text: r.sym; color: r.col; vertical-alignment: center; horizontal-alignment: center; }
+                                Text { text: r.name; color: r.header ? T.text : T.soft; font-weight: r.header ? 700 : 400; vertical-alignment: center; horizontal-stretch: 1; overflow: elide; }
+                                Text { width: 70px; text: r.phase; color: T.dim; vertical-alignment: center; }
+                                Text { width: 64px; text: r.dur; color: T.dim; vertical-alignment: center; horizontal-alignment: right; }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // botões
+        HorizontalLayout {
+            spacing: 8px;
+            NxButton { text: "Abrir log"; clicked => { root.open-log(); } }
+            NxButton { text: "Pasta dos logs"; clicked => { root.open-folder(); } }
+            Rectangle { horizontal-stretch: 1; }
+            Text { text: root.hint; color: T.dim; vertical-alignment: center; overflow: elide; }
+            NxButton { text: "■  Parar build"; enabled: root.active; clicked => { root.stop(); } }
+            NxButton { text: "▶  Retomar build"; primary: true; enabled: !root.active; clicked => { root.resume(); } }
+        }
+    }
+
+    // diálogo de confirmação
+    if root.dlg-visible: Rectangle {
+        x: 0;
+        y: 0;
+        width: root.width;
+        height: root.height;
+        background: #000000a8;
+        TouchArea { }
+        Rectangle {
+            width: 470px;
+            height: dlg-l.preferred-height;
+            background: T.card;
+            border-radius: 12px;
+            border-width: 1px;
+            border-color: T.border;
+            dlg-l := VerticalLayout {
+                padding: 22px;
+                spacing: 14px;
+                Text { text: root.dlg-title; color: T.text; font-size: 17px; font-weight: 700; }
+                Text { text: root.dlg-text; color: T.soft; wrap: word-wrap; }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 8px;
+                    if !root.dlg-ok-only: NxButton { text: "Cancelar"; clicked => { root.dlg-answer(false); } }
+                    NxButton { text: root.dlg-ok-only ? "OK" : "Sim"; primary: true; clicked => { root.dlg-answer(true); } }
+                }
+            }
+        }
+    }
+}

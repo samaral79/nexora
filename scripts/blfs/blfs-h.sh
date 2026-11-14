@@ -110,9 +110,9 @@ s_flow() {
     install -vDm644 $F/gtk-3.0/settings.ini /etc/gtk-3.0/settings.ini
     # nomes bonitos no ecrã de login
     sed -i -e 's/^Name=.*/Name=Nexora Flow (Wayland)/' \
-           -e 's/^Comment=.*/Comment=O ambiente da Nexora: janelas numa fita que desliza/' \
+           -e 's/^Comment=.*/Comment=The Nexora desktop: windows on a scrolling strip/' \
            /usr/share/wayland-sessions/niri.desktop
-    sed -i -e 's/^Name=.*/Name=Xfce (clássico)/' /usr/share/xsessions/xfce.desktop
+    sed -i -e 's/^Name=.*/Name=Xfce (classic)/' /usr/share/xsessions/xfce.desktop
     niri validate -c /etc/niri/config.kdl
 }
 

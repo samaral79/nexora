@@ -42,6 +42,7 @@ EOF
 # limpeza: nada de chaves, histórico nem identidade desta máquina na ISO
 rm -rf /root/.ssh /root/.bash_history /root/.cache /home/*/.bash_history
 rm -f /etc/ssh/ssh_host_*
+rm -rf /var/lib/lightdm/.cache/lightdm-gtk-greeter /var/cache/lightdm/dmrc/*   # sessões lembradas dos testes
 : > /etc/machine-id
 rm -f /var/lib/systemd/random-seed
 rm -rf /var/log/journal/* /tmp/* /var/tmp/*

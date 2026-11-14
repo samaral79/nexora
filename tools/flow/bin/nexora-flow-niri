@@ -29,6 +29,8 @@ def emit():
         "ws": [{"idx": w["idx"], "active": bool(w.get("is_active")), "windows": count.get(w["id"], 0)} for w in ws],
         "title": (f.get("title") or "")[:80],
         "app": f.get("app_id") or "",
+        # apps abertas (para os pontos da doca), em minúsculas para comparar à vontade
+        "apps": sorted({(w.get("app_id") or "").lower() for w in windows.values()} - {""}),
     }
     line = json.dumps(data, ensure_ascii=False)
     if line != last:
@@ -75,7 +77,7 @@ def handle(ev):
 
 
 def main():
-    print(json.dumps({"ws": [], "title": "", "app": ""}), flush=True)
+    print(json.dumps({"ws": [], "title": "", "app": "", "apps": []}), flush=True)
     while True:
         try:
             p = subprocess.Popen(["niri", "msg", "-j", "event-stream"], stdout=subprocess.PIPE, text=True)

@@ -93,15 +93,15 @@ set menu_color_normal=light-gray/black
 set menu_color_highlight=black/cyan
 set color_normal=light-gray/black
 
-menuentry "Nexora Linux $VER  (live / instalar)" {
+menuentry "Nexora Linux $VER  (live / install)" {
         linux  /boot/vmlinuz $CMD quiet loglevel=3 console=ttyS0,115200 console=tty0
         initrd /boot/initramfs.img
 }
-menuentry "Nexora Linux $VER  (live, modo gráfico seguro)" {
+menuentry "Nexora Linux $VER  (live, safe graphics)" {
         linux  /boot/vmlinuz $CMD nomodeset quiet loglevel=3 console=ttyS0,115200 console=tty0
         initrd /boot/initramfs.img
 }
-menuentry "Nexora Linux $VER  (live, com mensagens de arranque)" {
+menuentry "Nexora Linux $VER  (live, verbose boot)" {
         linux  /boot/vmlinuz $CMD console=ttyS0,115200 console=tty0
         initrd /boot/initramfs.img
 }

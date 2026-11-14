@@ -1,93 +1,163 @@
-;; Nexora Flow — barra e doca (eww). Cópia pessoal: cp -r /usr/share/nexora-flow/eww ~/.config/eww
+;; Nexora Flow — barra, doca, definições rápidas e calendário (eww).
+;; Cópia pessoal: cp -r /usr/share/nexora-flow/eww ~/.config/eww
 
 (defvar EWW "eww -c /usr/share/nexora-flow/eww")
 (defvar PANEL "/usr/share/icons/Papirus-Dark/24x24/panel")
-(defvar APPS "/usr/share/icons/Papirus-Dark/48x48/apps")
+(defvar APPS "/usr/share/icons/Papirus/48x48/apps")
 
-(deflisten niri :initial "{\"ws\":[],\"title\":\"\",\"app\":\"\"}" "nexora-flow-niri")
-(defpoll status :interval "8s" :initial "{\"net\":\"\",\"net_icon\":\"\",\"bat\":\"\"}" "nexora-flow-status")
-(defpoll clock :interval "10s" "date '+%a %d %b   %H:%M'")
-(defvar power false)
+(deflisten niri :initial "{\"ws\":[],\"title\":\"\",\"app\":\"\",\"apps\":[]}" "nexora-flow-niri")
+(defpoll st :interval "2s"
+  :initial "{\"net\":\"\",\"net_icon\":\"\",\"wifi_on\":false,\"vol\":0,\"muted\":false,\"vol_icon\":\"\",\"bat\":\"\",\"bat_icon\":\"\",\"dnd\":false,\"user\":\"\"}"
+  "nexora-flow-status")
+(defpoll clock :interval "5s" "date '+%H:%M'")
+(defpoll day :interval "60s" "date '+%a %d %b'")
+(defpoll today :interval "60s" "date '+%A, %d %B'")
 
-;; ---------------------------------------------------------------- barra
-(defwidget logo []
-  (button :class "logo" :tooltip "Apps (Super+Espaço)" :onclick "fuzzel &"
-    (box :space-evenly false :spacing 8
-      (image :path "/usr/share/icons/hicolor/scalable/apps/nexora.svg" :image-width 20 :image-height 20)
-      (label :class "brand" :text "Nexora" :truncate false))))
+;; ================================================================= barra
+(defwidget launcher []
+  (button :class "launcher" :tooltip "Apps (Super+Space)" :onclick "fuzzel &"
+    (image :path "/usr/share/icons/hicolor/scalable/apps/nexora.svg" :image-width 18 :image-height 18)))
 
 (defwidget workspaces []
-  (box :class "ws" :space-evenly false :spacing 6 :valign "center"
+  (box :class "ws" :space-evenly false :spacing 5 :valign "center"
     (for w in {niri.ws}
       (button :class {w.active ? "dot active" : (w.windows > 0 ? "dot busy" : "dot")}
-              :tooltip "Área ${w.idx}"
+              :tooltip "Workspace ${w.idx}"
               :onclick "niri msg action focus-workspace ${w.idx}" ""))))
 
 (defwidget left []
-  (box :space-evenly false :spacing 14 :halign "start"
-    (logo)
+  (box :class "group" :space-evenly false :spacing 12 :halign "start"
+    (launcher)
     (workspaces)
-    (label :class "title" :limit-width 60 :text {niri.title})))
+    (label :class "title" :limit-width 48 :visible {niri.title != ""} :text {niri.title})))
 
 (defwidget center []
-  (label :class "clock" :text clock))
+  (button :class "clockbtn" :onclick "${EWW} open --toggle calendar"
+    (box :space-evenly false :spacing 10
+      (label :class "day" :text day)
+      (label :class "clock" :text clock))))
 
 (defwidget right []
-  (box :space-evenly false :spacing 14 :halign "end"
-    (button :class "chip" :tooltip "Rede (abrir ligações)" :onclick "nm-connection-editor &"
-      (box :space-evenly false :spacing 6
-        (image :path {status.net_icon} :image-width 16 :image-height 16)
-        (label :text {status.net})))
-    (box :class "chip" :visible {status.bat != ""} :space-evenly false :spacing 6
-      (image :path "${PANEL}/battery-good.svg" :image-width 16 :image-height 16)
-      (label :text {status.bat}))
-    (button :class "power" :tooltip "Sessão" :onclick "${EWW} open --toggle powermenu"
-      (image :path "${PANEL}/system-shutdown-panel.svg" :image-width 16 :image-height 16))))
+  (box :class "group" :space-evenly false :spacing 6 :halign "end"
+    (systray :class "tray" :icon-size 16 :spacing 6 :prepend-new true)
+    (button :class "qs-toggle" :tooltip "Quick settings" :onclick "${EWW} open --toggle quicksettings"
+      (box :space-evenly false :spacing 10
+        (image :path {st.net_icon} :image-width 16 :image-height 16)
+        (image :path {st.vol_icon} :image-width 16 :image-height 16)
+        (box :visible {st.bat != ""} :space-evenly false :spacing 4
+          (image :path {st.bat_icon} :image-width 16 :image-height 16)
+          (label :class "small" :text "${st.bat}%"))
+        (image :path "${PANEL}/system-shutdown-panel.svg" :image-width 14 :image-height 14)))))
 
 (defwindow bar
   :monitor 0
-  :geometry (geometry :x "0" :y "0" :width "100%" :height "36px" :anchor "top center")
+  :geometry (geometry :x "0" :y "6px" :width "99%" :height "38px" :anchor "top center")
   :stacking "fg"
   :exclusive true
   :focusable false
   :namespace "nexora-bar"
   (centerbox :class "bar" (left) (center) (right)))
 
-;; ---------------------------------------------------------------- doca
-(defwidget app [icon cmd name]
+;; ================================================================= doca
+(defwidget app [icon cmd name id]
   (button :class "app" :tooltip name :onclick "${cmd} &"
-    (image :path icon :image-width 40 :image-height 40)))
+    (box :orientation "v" :space-evenly false :spacing 2
+      (image :path icon :image-width 42 :image-height 42)
+      (box :class {arraylength(jq(niri.apps, "map(select(. == \"${id}\"))")) > 0 ? "run on" : "run"}
+           :halign "center"))))
 
 (defwindow dock
   :monitor 0
-  :geometry (geometry :x "0" :y "10px" :width "0" :height "60px" :anchor "bottom center")
+  :geometry (geometry :x "0" :y "8px" :width "0" :height "64px" :anchor "bottom center")
   :stacking "fg"
   :exclusive true
   :focusable false
   :namespace "nexora-dock"
   (box :class "dock" :space-evenly false :spacing 4
-    (app :icon "${APPS}/utilities-terminal.svg" :cmd "xfce4-terminal" :name "Terminal")
-    (app :icon "${APPS}/system-file-manager.svg" :cmd "thunar" :name "Ficheiros")
-    (app :icon "${APPS}/accessories-text-editor.svg" :cmd "mousepad" :name "Editor de texto")
-    (app :icon "${APPS}/org.xfce.ristretto.svg" :cmd "ristretto" :name "Imagens")
+    (app :icon "${APPS}/org.gnome.Nautilus.svg" :cmd "nautilus --new-window" :name "Files" :id "org.gnome.nautilus")
+    (app :icon "${APPS}/firefox.svg" :cmd "firefox" :name "Firefox" :id "firefox")
+    (app :icon "${APPS}/org.gnome.Ptyxis.svg" :cmd "ptyxis --new-window" :name "Terminal" :id "org.gnome.ptyxis")
+    (app :icon "${APPS}/org.gnome.TextEditor.svg" :cmd "gnome-text-editor" :name "Text Editor" :id "org.gnome.texteditor")
+    (app :icon "${APPS}/io.github.celluloid_player.Celluloid.svg" :cmd "celluloid" :name "Videos" :id "io.github.celluloid_player.celluloid")
+    (app :icon "${APPS}/org.gnome.Software.svg" :cmd "gnome-software" :name "Software" :id "org.gnome.software")
+    (app :icon "${APPS}/preferences-system.svg" :cmd "nexora-settings" :name "Settings" :id "org.nexora.settings")
     (box :class "sep")
-    (app :icon "${APPS}/preferences-system.svg" :cmd "fuzzel" :name "Todas as apps")))
+    (app :icon "${APPS}/applications-all.svg" :cmd "fuzzel" :name "All apps" :id "-")))
 
-;; ---------------------------------------------------------------- menu de sessão
-(defwidget pbutton [icon text cmd]
-  (button :class "pbutton" :onclick "${EWW} close powermenu; ${cmd}"
+;; ================================================================= definições rápidas
+(defwidget tile [icon label sub active cmd]
+  (button :class {active ? "tile on" : "tile"} :onclick cmd
+    (box :space-evenly false :spacing 10
+      (image :path icon :image-width 20 :image-height 20)
+      (box :orientation "v" :space-evenly false :valign "center"
+        (label :class "tile-title" :xalign 0 :limit-width 16 :text label)
+        (label :class "tile-sub" :xalign 0 :limit-width 18 :visible {sub != ""} :text sub)))))
+
+(defwidget pbtn [icon tip cmd]
+  (button :class "pbtn" :tooltip tip :onclick "${EWW} close quicksettings; ${cmd}"
+    (image :path icon :image-width 18 :image-height 18)))
+
+(defwindow quicksettings
+  :monitor 0
+  :geometry (geometry :x "10px" :y "6px" :width "360px" :anchor "top right")
+  :stacking "overlay"
+  :focusable false
+  :namespace "nexora-qs"
+  (box :class "qs" :orientation "v" :space-evenly false :spacing 14
+    (box :class "qs-head" :space-evenly false :spacing 10
+      (image :path "/usr/share/icons/Papirus/48x48/apps/preferences-desktop-user.svg" :image-width 36 :image-height 36)
+      (box :orientation "v" :space-evenly false :hexpand true :valign "center"
+        (label :class "qs-user" :xalign 0 :text {st.user})
+        (label :class "qs-sub" :xalign 0 :text today))
+      (pbtn :icon "/usr/share/icons/Papirus/24x24/apps/preferences-system.svg" :tip "Settings" :cmd "nexora-settings &")
+      (pbtn :icon "/usr/share/icons/Papirus/24x24/apps/system-lock-screen.svg" :tip "Lock" :cmd "swaylock -f &")
+      (pbtn :icon "/usr/share/icons/Papirus/24x24/apps/system-shutdown.svg" :tip "Power" :cmd "${EWW} open powermenu"))
+    (box :class "slider" :space-evenly false :spacing 10
+      (button :class "icon-btn" :tooltip "Mute" :onclick "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
+        (image :path {st.vol_icon} :image-width 18 :image-height 18))
+      (scale :hexpand true :min 0 :max 101 :value {st.vol}
+             :onchange "wpctl set-volume @DEFAULT_AUDIO_SINK@ {}%")
+      (label :class "small" :text "${st.vol}%"))
+    (box :class "tiles" :orientation "v" :space-evenly true :spacing 8
+      (box :space-evenly true :spacing 8
+        (tile :icon {st.net_icon} :label "Network" :sub {st.net} :active {st.net != "Offline"}
+              :cmd "${EWW} close quicksettings; nexora-settings network &")
+        (tile :icon "${PANEL}/network-wireless-signal-excellent.svg" :label "Wi-Fi" :sub {st.wifi_on ? "On" : "Off"}
+              :active {st.wifi_on} :cmd "nmcli radio wifi ${st.wifi_on ? 'off' : 'on'}"))
+      (box :space-evenly true :spacing 8
+        (tile :icon "${PANEL}/notification-disabled.svg" :label "Do not disturb" :sub {st.dnd ? "On" : "Off"}
+              :active {st.dnd} :cmd "makoctl mode -t do-not-disturb")
+        (tile :icon "${PANEL}/audio-volume-high.svg" :label "Sound" :sub "Devices"
+              :active false :cmd "${EWW} close quicksettings; pavucontrol &")))))
+
+;; ================================================================= energia
+(defwidget pitem [icon text cmd]
+  (button :class "pitem" :onclick "${EWW} close powermenu; ${cmd}"
     (box :space-evenly false :spacing 12
       (image :path icon :image-width 22 :image-height 22)
       (label :text text))))
 
 (defwindow powermenu
   :monitor 0
-  :geometry (geometry :x "10px" :y "8px" :anchor "top right")
+  :geometry (geometry :x "10px" :y "6px" :width "240px" :anchor "top right")
   :stacking "overlay"
   :focusable false
   :namespace "nexora-power"
-  (box :class "powermenu" :orientation "v" :space-evenly false :spacing 2
-    (pbutton :icon "/usr/share/icons/Papirus/24x24/apps/system-lock-screen.svg" :text "Bloquear" :cmd "swaylock -f &")
-    (pbutton :icon "/usr/share/icons/Papirus/24x24/apps/system-log-out.svg" :text "Terminar sessão" :cmd "niri msg action quit --skip-confirmation")
-    (pbutton :icon "/usr/share/icons/Papirus/24x24/apps/system-reboot.svg" :text "Reiniciar" :cmd "systemctl reboot")
-    (pbutton :icon "/usr/share/icons/Papirus/24x24/apps/system-shutdown.svg" :text "Desligar" :cmd "systemctl poweroff")))
+  (box :class "qs" :orientation "v" :space-evenly false :spacing 2
+    (pitem :icon "/usr/share/icons/Papirus/24x24/apps/system-lock-screen.svg" :text "Lock" :cmd "swaylock -f &")
+    (pitem :icon "/usr/share/icons/Papirus/24x24/apps/system-log-out.svg" :text "Log out" :cmd "niri msg action quit --skip-confirmation")
+    (pitem :icon "/usr/share/icons/Papirus/24x24/apps/system-suspend.svg" :text "Suspend" :cmd "systemctl suspend")
+    (pitem :icon "/usr/share/icons/Papirus/24x24/apps/system-reboot.svg" :text "Restart" :cmd "systemctl reboot")
+    (pitem :icon "/usr/share/icons/Papirus/24x24/apps/system-shutdown.svg" :text "Shut down" :cmd "systemctl poweroff")
+    (button :class "pitem cancel" :onclick "${EWW} close powermenu" (label :text "Cancel"))))
+
+;; ================================================================= calendário
+(defwindow calendar
+  :monitor 0
+  :geometry (geometry :x "0" :y "6px" :width "300px" :anchor "top center")
+  :stacking "overlay"
+  :focusable false
+  :namespace "nexora-cal"
+  (box :class "qs" :orientation "v" :space-evenly false :spacing 8
+    (label :class "cal-today" :xalign 0 :text today)
+    (calendar :class "cal")))

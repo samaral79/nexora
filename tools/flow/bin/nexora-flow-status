@@ -1,19 +1,52 @@
 #!/bin/sh
-# Estado da rede e da bateria para a barra do Nexora Flow (eww defpoll). Escreve uma linha JSON.
+# Estado do sistema para a barra do Nexora Flow (eww defpoll): rede, som e bateria. Uma linha JSON.
 I=/usr/share/icons/Papirus-Dark/24x24/panel
-net_text="Sem rede"; net_icon="$I/network-offline.svg"
+
+# ---- rede
+net="Offline"; net_icon="$I/network-offline.svg"; wifi_on=false
 if command -v nmcli >/dev/null 2>&1; then
+    nmcli radio wifi 2>/dev/null | grep -q enabled && wifi_on=true
     line=$(nmcli -t -f TYPE,STATE,CONNECTION device 2>/dev/null | grep ':connected:' | head -1)
     type=${line%%:*}; name=${line##*:}
     case $type in
-        wifi)     net_icon="$I/network-wireless-signal-excellent.svg"; net_text=$name ;;
-        ethernet) net_icon="$I/network-wired.svg"; net_text="Cabo" ;;
-        "")       ;;
-        *)        net_icon="$I/network-wired.svg"; net_text=$name ;;
+        wifi)
+            sig=$(nmcli -t -f IN-USE,SIGNAL dev wifi 2>/dev/null | grep '^\*' | cut -d: -f2)
+            s=excellent; [ "${sig:-100}" -lt 75 ] && s=good; [ "${sig:-100}" -lt 50 ] && s=ok; [ "${sig:-100}" -lt 25 ] && s=weak
+            net_icon="$I/network-wireless-signal-$s.svg"; net=$name ;;
+        ethernet) net_icon="$I/network-wired.svg"; net="Wired" ;;
+        "") ;;
+        *) net_icon="$I/network-wired.svg"; net=$name ;;
     esac
 fi
-bat=""
+
+# ---- som (PipeWire)
+vol=0; muted=false; vol_icon="$I/audio-volume-muted.svg"
+if out=$(wpctl get-volume @DEFAULT_AUDIO_SINK@ 2>/dev/null); then
+    vol=$(echo "$out" | awk '{printf "%d", $2*100 + 0.5}')
+    case $out in *MUTED*) muted=true ;; esac
+    if [ "$muted" = true ] || [ "$vol" -eq 0 ]; then vol_icon="$I/audio-volume-muted.svg"
+    elif [ "$vol" -lt 34 ]; then vol_icon="$I/audio-volume-low.svg"
+    elif [ "$vol" -lt 67 ]; then vol_icon="$I/audio-volume-medium.svg"
+    else vol_icon="$I/audio-volume-high.svg"; fi
+fi
+
+# ---- bateria
+bat=""; bat_icon=""
 for b in /sys/class/power_supply/BAT*; do
-    [ -r "$b/capacity" ] && bat="$(cat "$b/capacity")%" && break
+    [ -r "$b/capacity" ] || continue
+    bat=$(cat "$b/capacity"); st=$(cat "$b/status" 2>/dev/null)
+    lvl=$(( (bat + 5) / 10 * 10 )); [ $lvl -gt 100 ] && lvl=100
+    ch=""; [ "$st" = Charging ] && ch="-charging"
+    bat_icon=$(printf "$I/battery-%03d%s.svg" $lvl "$ch")
+    break
 done
-printf '{"net":"%s","net_icon":"%s","bat":"%s"}\n' "$net_text" "$net_icon" "$bat"
+
+# ---- não incomodar (mako)
+dnd=false
+makoctl mode 2>/dev/null | grep -q do-not-disturb && dnd=true
+
+user=$(getent passwd "$(id -un)" | cut -d: -f5 | cut -d, -f1); [ -n "$user" ] || user=$(id -un)
+
+printf '{"net":"%s","net_icon":"%s","wifi_on":%s,"vol":%s,"muted":%s,"vol_icon":"%s","bat":"%s","bat_icon":"%s","dnd":%s,"user":"%s"}\n' \
+    "$(printf %s "$net" | sed 's/"/\\"/g')" "$net_icon" "$wifi_on" "$vol" "$muted" "$vol_icon" "$bat" "$bat_icon" "$dnd" \
+    "$(printf %s "$user" | sed 's/"/\\"/g')"

@@ -5,7 +5,10 @@ S=/usr/share/nexora-flow
 EWW=$S/eww;  [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/eww/eww.yuck" ] && EWW="${XDG_CONFIG_HOME:-$HOME/.config}/eww"
 MAKO=$S/mako.conf; [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/mako/config" ] && MAKO="${XDG_CONFIG_HOME:-$HOME/.config}/mako/config"
 
-swaybg -m fill -i /usr/share/backgrounds/nexora/nexora-aurora.png >/dev/null 2>&1 &
+# fundo escolhido na app Definições (~/.config/nexora/wallpaper)
+WALL=/usr/share/backgrounds/nexora/nexora-aurora.png
+W=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/nexora/wallpaper" 2>/dev/null); [ -f "$W" ] && WALL=$W
+swaybg -m fill -i "$WALL" >/dev/null 2>&1 &
 mako -c "$MAKO" >/dev/null 2>&1 &
 eww -c "$EWW" daemon
 eww -c "$EWW" open-many bar dock

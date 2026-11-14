@@ -10,6 +10,10 @@ LOGS=$SRC/.logs
 DONE=$SRC/.done
 mkdir -p "$LOGS" "$DONE"
 
+# ninja e cargo seguem o mesmo número de jobs que o make (NX_JOBS, vem do chroot.sh)
+ninja() { command ninja -j"${NX_JOBS:-$(nproc)}" "$@"; }
+[ -n "${NX_JOBS:-}" ] && export CARGO_BUILD_JOBS=$NX_JOBS
+
 _run() {
     local name=$1 fn=$2 t0=$SECONDS
     # NÃO pôr o subshell como condição de um if: aí o bash ignora o set -e lá dentro
@@ -35,7 +39,7 @@ pkg() {
     echo "🔨 $name ..."
     cd "$SRC"
     local dir
-    dir=$(set +o pipefail; tar -tf "$tarball" | head -1 | cut -d/ -f1)
+    dir=$(set +o pipefail; tar -tf "$tarball" | sed "s|^\./||" | grep -v "^$" | head -1 | cut -d/ -f1)
     [ -n "$dir" ] && [ "$dir" != "." ] || { echo "não percebi a pasta de $tarball"; exit 1; }
     rm -rf "$dir"
     tar -xf "$tarball"

@@ -1,5 +1,6 @@
 // Nexora Flow — configuração do niri (do sistema).
-// Para personalizar: cp /etc/niri/config.kdl ~/.config/niri/config.kdl e edita essa cópia.
+// Para personalizar: cp /etc/niri/config.kdl ~/.config/niri/config.kdl e edita essa cópia
+// (a app Definições faz isso sozinha e guarda as escolhas num bloco no fim).
 // As janelas vivem numa fita horizontal: Super+roda ou Super+setas para deslizar.
 
 input {
@@ -85,11 +86,7 @@ window-rule {
     clip-to-geometry true
 }
 window-rule {
-    match is-active=false
-    opacity 0.97
-}
-window-rule {
-    match app-id=r#"^(nm-connection-editor|xfce4-appfinder|org\.xfce\.ristretto)$"#
+    match app-id=r#"^(nm-connection-editor|xfce4-appfinder|org\.gnome\.Calculator|org\.pulseaudio\.pavucontrol|org\.nexora\.Settings|org\.gnome\.FileRoller)$"#
     open-floating true
 }
 
@@ -103,11 +100,20 @@ binds {
     Mod+Shift+Slash { show-hotkey-overlay; }
 
     // apps
-    Mod+Return hotkey-overlay-title="Terminal" { spawn "xfce4-terminal"; }
-    Mod+Space  hotkey-overlay-title="Lançador de apps" { spawn "fuzzel"; }
+    Mod+Return hotkey-overlay-title="Terminal" { spawn "ptyxis" "--new-window"; }
+    Mod+Space  hotkey-overlay-title="App launcher" { spawn "fuzzel"; }
     Mod+D      { spawn "fuzzel"; }
-    Mod+E      hotkey-overlay-title="Ficheiros" { spawn "thunar"; }
-    Super+Alt+L hotkey-overlay-title="Bloquear o ecrã" { spawn "swaylock" "-f"; }
+    Mod+E      hotkey-overlay-title="Files" { spawn "nautilus" "--new-window"; }
+    Mod+B      hotkey-overlay-title="Firefox" { spawn "firefox"; }
+    Mod+I      hotkey-overlay-title="Settings" { spawn "nexora-settings"; }
+    Mod+A      hotkey-overlay-title="Quick settings" { spawn "eww" "-c" "/usr/share/nexora-flow/eww" "open" "--toggle" "quicksettings"; }
+
+    // volume e brilho (teclas multimédia)
+    XF86AudioRaiseVolume allow-when-locked=true { spawn "wpctl" "set-volume" "-l" "1.0" "@DEFAULT_AUDIO_SINK@" "5%+"; }
+    XF86AudioLowerVolume allow-when-locked=true { spawn "wpctl" "set-volume" "@DEFAULT_AUDIO_SINK@" "5%-"; }
+    XF86AudioMute        allow-when-locked=true { spawn "wpctl" "set-mute" "@DEFAULT_AUDIO_SINK@" "toggle"; }
+    XF86AudioMicMute     allow-when-locked=true { spawn "wpctl" "set-mute" "@DEFAULT_AUDIO_SOURCE@" "toggle"; }
+    Super+Alt+L hotkey-overlay-title="Lock screen" { spawn "swaylock" "-f"; }
 
     Mod+O repeat=false { toggle-overview; }
     Mod+Q repeat=false { close-window; }

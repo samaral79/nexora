@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Settings
+Comment=Wallpaper, displays, sound, network and keyboard
+Exec=nexora-settings
+Icon=preferences-system
+Terminal=false
+Categories=Settings;System;GTK;
+Keywords=wallpaper;display;sound;volume;wifi;network;keyboard;
+StartupNotify=true

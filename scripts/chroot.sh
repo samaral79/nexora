@@ -38,9 +38,11 @@ mkdir -p $DEST
 cp "$(dirname "$0")"/build/*.sh "$(dirname "$0")"/blfs/*.sh $DEST/
 mkdir -p $DEST/installer && cp -a "$(dirname "$0")"/../tools/installer/. $DEST/installer/
 mkdir -p $DEST/flow && cp -a "$(dirname "$0")"/../tools/flow/. $DEST/flow/
+mkdir -p $DEST/login && cp -a "$(dirname "$0")"/../tools/login/. $DEST/login/
 
 ENV=(HOME=/root TERM="$TERM" PS1='(nexora chroot) \u:\w\$ '
-     PATH=/usr/bin:/usr/sbin MAKEFLAGS="-j$(nproc)" TESTSUITEFLAGS="-j$(nproc)" LFS=)
+     PATH=/usr/bin:/usr/sbin MAKEFLAGS="-j${NX_JOBS:-$(nproc)}" TESTSUITEFLAGS="-j${NX_JOBS:-$(nproc)}"
+     NX_JOBS="${NX_JOBS:-$(nproc)}" LFS=)
 if [ $# -gt 0 ]; then
     chroot "$LFS" /usr/bin/env -i "${ENV[@]}" /bin/bash /sources/nexora-build/$1.sh
 else

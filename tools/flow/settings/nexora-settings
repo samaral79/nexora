@@ -1,0 +1,574 @@
+#!/usr/bin/env python3
+"""Nexora Settings — definições do Nexora Flow (GTK4 + libadwaita).
+
+Aparência (fundo, modo escuro, cor de destaque), ecrãs (niri), som (PipeWire/wpctl),
+rede (NetworkManager/nmcli), teclado e "Acerca". As mudanças do niri vão para um bloco
+gerido em ~/.config/niri/config.kdl (o niri recarrega-o sozinho).
+"""
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import threading
+
+import gi
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+from gi.repository import Adw, Gio, GLib, Gtk  # noqa: E402
+
+APP_ID = "org.nexora.Settings"
+HOME = os.path.expanduser("~")
+CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config")), "nexora")
+NIRI_USER = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.join(HOME, ".config")), "niri", "config.kdl")
+NIRI_SYS = "/etc/niri/config.kdl"
+WALL_DIRS = ["/usr/share/backgrounds/nexora", os.path.join(HOME, "Pictures", "Wallpapers"),
+             os.path.join(HOME, "Pictures")]
+BEGIN, END = "// >>> nexora-settings (gerido pela app Definições)", "// <<< nexora-settings"
+ACCENTS = [  # (nome, id do libadwaita, cor A, cor B do anel do niri)
+    ("Ciano Nexora", "teal", "#22b8cf", "#7b5cff"),
+    ("Azul", "blue", "#3584e4", "#22b8cf"),
+    ("Violeta", "purple", "#9141ac", "#7b5cff"),
+    ("Rosa", "pink", "#d56199", "#9141ac"),
+    ("Laranja", "orange", "#ed5b00", "#e5a50a"),
+    ("Verde", "green", "#3a944a", "#22b8cf"),
+    ("Ardósia", "slate", "#6f8396", "#22b8cf"),
+]
+KEYMAPS = [("Português", "pt"), ("Português (Brasil)", "br"), ("English (US)", "us"),
+           ("English (UK)", "gb"), ("Español", "es"), ("Français", "fr"), ("Deutsch", "de")]
+
+
+def run(cmd, timeout=6):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout).stdout
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def in_niri():
+    return bool(os.environ.get("NIRI_SOCKET"))
+
+
+def read_conf(name, default=""):
+    try:
+        with open(os.path.join(CONF, name)) as f:
+            return f.read().strip()
+    except OSError:
+        return default
+
+
+def write_conf(name, value):
+    os.makedirs(CONF, exist_ok=True)
+    with open(os.path.join(CONF, name), "w") as f:
+        f.write(value + "\n")
+
+
+# ------------------------------------------------------------------ bloco gerido no niri
+def niri_block_get():
+    try:
+        with open(NIRI_USER) as f:
+            txt = f.read()
+    except OSError:
+        return {}
+    m = re.search(re.escape(BEGIN) + r"\n// (\{.*\})\n", txt)
+    return json.loads(m.group(1)) if m else {}
+
+
+def niri_block_set(state):
+    """Reescreve o bloco gerido (saídas, teclado, anel de foco) no config do utilizador."""
+    os.makedirs(os.path.dirname(NIRI_USER), exist_ok=True)
+    if not os.path.exists(NIRI_USER):
+        shutil.copy(NIRI_SYS, NIRI_USER)
+    with open(NIRI_USER) as f:
+        txt = f.read()
+    txt = re.sub(re.escape(BEGIN) + r".*?" + re.escape(END) + r"\n?", "", txt, flags=re.S)
+    if "layout" in state:
+        txt = re.sub(r'(\n\s*layout )"[a-z]+"', r'\1"%s"' % state["layout"], txt, count=1)
+    if "ring" in state:
+        a, b = state["ring"]
+        txt = re.sub(r'active-gradient from="#[0-9a-fA-F]+" to="#[0-9a-fA-F]+"',
+                     f'active-gradient from="{a}" to="{b}"', txt, count=1)
+    lines = [BEGIN, "// " + json.dumps(state)]
+    for name, o in sorted(state.get("outputs", {}).items()):
+        lines.append(f'output "{name}" {{')
+        if o.get("off"):
+            lines.append("    off")
+        if o.get("mode"):
+            lines.append(f'    mode "{o["mode"]}"')
+        if o.get("scale"):
+            lines.append(f'    scale {o["scale"]}')
+        lines.append("}")
+    lines.append(END)
+    with open(NIRI_USER, "w") as f:
+        f.write(txt.rstrip("\n") + "\n\n" + "\n".join(lines) + "\n")
+
+
+def niri_update(**kw):
+    st = niri_block_get()
+    for k, v in kw.items():
+        if k == "outputs":
+            st.setdefault("outputs", {}).update(v)
+        else:
+            st[k] = v
+    niri_block_set(st)
+
+
+# ------------------------------------------------------------------ janela
+class Settings(Adw.ApplicationWindow):
+    def __init__(self, app):
+        super().__init__(application=app, title="Settings")
+        self.set_default_size(980, 680)
+        self.split = Adw.NavigationSplitView()
+
+        self.stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE)
+        pages = [
+            ("appearance", "Appearance", "applications-graphics-symbolic", self.page_appearance),
+            ("displays", "Displays", "video-display-symbolic", self.page_displays),
+            ("sound", "Sound", "audio-volume-high-symbolic", self.page_sound),
+            ("network", "Network", "network-wireless-symbolic", self.page_network),
+            ("keyboard", "Keyboard", "input-keyboard-symbolic", self.page_keyboard),
+            ("about", "About", "help-about-symbolic", self.page_about),
+        ]
+        lb = Gtk.ListBox(css_classes=["navigation-sidebar"])
+        self.rows = {}
+        for pid, title, icon, build in pages:
+            row = Gtk.ListBoxRow()
+            box = Gtk.Box(spacing=12, margin_start=6, margin_end=6, margin_top=8, margin_bottom=8)
+            box.append(Gtk.Image.new_from_icon_name(icon))
+            box.append(Gtk.Label(label=title, xalign=0))
+            row.set_child(box)
+            row.pid = pid
+            lb.append(row)
+            self.stack.add_named(build(), pid)
+            self.rows[pid] = title
+        lb.connect("row-selected", self.on_select)
+
+        side = Adw.ToolbarView()
+        hb = Adw.HeaderBar()
+        hb.set_title_widget(Adw.WindowTitle(title="Settings", subtitle="Nexora"))
+        side.add_top_bar(hb)
+        side.set_content(Gtk.ScrolledWindow(child=lb, vexpand=True))
+        self.split.set_sidebar(Adw.NavigationPage(title="Settings", child=side))
+
+        self.content = Adw.ToolbarView()
+        self.content_hb = Adw.HeaderBar()
+        self.content.add_top_bar(self.content_hb)
+        self.content.set_content(self.stack)
+        self.content_page = Adw.NavigationPage(title="Appearance", child=self.content)
+        self.split.set_content(self.content_page)
+        self.toasts = Adw.ToastOverlay(child=self.split)
+        self.set_content(self.toasts)
+        lb.select_row(lb.get_row_at_index(0))
+
+    def toast(self, text):
+        self.toasts.add_toast(Adw.Toast(title=text, timeout=2))
+
+    def on_select(self, _lb, row):
+        if row:
+            self.stack.set_visible_child_name(row.pid)
+            self.content_page.set_title(self.rows[row.pid])
+            self.split.set_show_content(True)
+
+    def prefs_page(self):
+        return Adw.PreferencesPage()
+
+    # -------------------------------------------------------------- Aparência
+    def page_appearance(self):
+        page = self.prefs_page()
+        g = Adw.PreferencesGroup(title="Wallpaper")
+        flow = Gtk.FlowBox(selection_mode=Gtk.SelectionMode.SINGLE, max_children_per_line=4,
+                           min_children_per_line=2, row_spacing=12, column_spacing=12, homogeneous=True)
+        current = read_conf("wallpaper", "/usr/share/backgrounds/nexora/nexora-aurora.png")
+        for path in self.wallpapers():
+            pic = Gtk.Picture.new_for_filename(path)
+            pic.set_content_fit(Gtk.ContentFit.COVER)
+            pic.set_size_request(180, 110)
+            frame = Gtk.Frame(child=pic, css_classes=["card"])
+            frame.set_overflow(Gtk.Overflow.HIDDEN)
+            child = Gtk.FlowBoxChild(child=frame)
+            child.path = path
+            flow.append(child)
+            if path == current:
+                flow.select_child(child)
+        flow.connect("child-activated", self.on_wallpaper)
+        g.add(flow)
+        more = Gtk.Button(label="Choose an image…", halign=Gtk.Align.START, margin_top=6,
+                          css_classes=["pill"])
+        more.connect("clicked", self.pick_wallpaper)
+        g.add(more)
+        page.add(g)
+
+        g2 = Adw.PreferencesGroup(title="Style")
+        dark = Adw.SwitchRow(title="Dark mode", subtitle="Dark apps and panels")
+        dark.set_active(self.gs_get("org.gnome.desktop.interface", "color-scheme", "prefer-dark") == "prefer-dark")
+        dark.connect("notify::active", lambda r, _p: self.set_dark(r.get_active()))
+        g2.add(dark)
+        acc = Adw.ComboRow(title="Accent colour",
+                           model=Gtk.StringList.new([a[0] for a in ACCENTS]))
+        cur = self.gs_get("org.gnome.desktop.interface", "accent-color", "teal")
+        acc.set_selected(next((i for i, a in enumerate(ACCENTS) if a[1] == cur), 0))
+        acc.connect("notify::selected", lambda r, _p: self.set_accent(ACCENTS[r.get_selected()]))
+        g2.add(acc)
+        page.add(g2)
+        return page
+
+    def wallpapers(self):
+        out = []
+        for d in WALL_DIRS:
+            try:
+                for f in sorted(os.listdir(d)):
+                    if f.lower().endswith((".png", ".jpg", ".jpeg", ".webp")) and "logo" not in f:
+                        out.append(os.path.join(d, f))
+            except OSError:
+                pass
+        return out[:24]
+
+    def on_wallpaper(self, _flow, child):
+        self.apply_wallpaper(child.path)
+
+    def pick_wallpaper(self, *_):
+        dlg = Gtk.FileDialog(title="Choose a wallpaper")
+        filt = Gtk.FileFilter()
+        filt.add_mime_type("image/*")
+        store = Gio.ListStore.new(Gtk.FileFilter)
+        store.append(filt)
+        dlg.set_filters(store)
+
+        def done(d, res):
+            try:
+                f = d.open_finish(res)
+            except GLib.Error:
+                return
+            if f:
+                self.apply_wallpaper(f.get_path())
+        dlg.open(self, None, done)
+
+    def apply_wallpaper(self, path):
+        write_conf("wallpaper", path)
+        if in_niri():
+            subprocess.run(["pkill", "-x", "swaybg"])
+            subprocess.Popen(["swaybg", "-m", "fill", "-i", path], stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, start_new_session=True)
+        elif shutil.which("xfconf-query"):
+            for prop in run(["xfconf-query", "-c", "xfce4-desktop", "-l"]).split():
+                if prop.endswith("/last-image"):
+                    subprocess.run(["xfconf-query", "-c", "xfce4-desktop", "-p", prop, "-s", path])
+        self.toast("Wallpaper changed")
+
+    def gs_get(self, schema, key, default):
+        src = Gio.SettingsSchemaSource.get_default()
+        if not src or not src.lookup(schema, True) or not src.lookup(schema, True).has_key(key):
+            return default
+        return Gio.Settings.new(schema).get_string(key)
+
+    def gs_set(self, schema, key, value):
+        src = Gio.SettingsSchemaSource.get_default()
+        if src and src.lookup(schema, True) and src.lookup(schema, True).has_key(key):
+            Gio.Settings.new(schema).set_string(key, value)
+
+    def set_dark(self, on):
+        self.gs_set("org.gnome.desktop.interface", "color-scheme", "prefer-dark" if on else "default")
+        Adw.StyleManager.get_default().set_color_scheme(
+            Adw.ColorScheme.PREFER_DARK if on else Adw.ColorScheme.DEFAULT)
+
+    def set_accent(self, acc):
+        _name, aid, a, b = acc
+        self.gs_set("org.gnome.desktop.interface", "accent-color", aid)
+        if in_niri() or os.path.exists(NIRI_USER):
+            niri_update(ring=[a, b])
+        self.toast("Accent colour changed")
+
+    # -------------------------------------------------------------- Ecrãs
+    def page_displays(self):
+        page = self.prefs_page()
+        g = Adw.PreferencesGroup(title="Displays")
+        if not in_niri():
+            g.set_description("Display settings here apply to the Nexora Flow session. "
+                              "In Xfce use the Display app.")
+            btn = Gtk.Button(label="Open Xfce Display settings", halign=Gtk.Align.START,
+                             css_classes=["pill"])
+            btn.connect("clicked", lambda *_: subprocess.Popen(["xfce4-display-settings"]))
+            g.add(btn)
+            page.add(g)
+            return page
+        try:
+            outs = json.loads(run(["niri", "msg", "--json", "outputs"]) or "{}")
+        except json.JSONDecodeError:
+            outs = {}
+        if not outs:
+            g.add(Adw.ActionRow(title="No displays found"))
+        for name, o in sorted(outs.items()):
+            exp = Adw.ExpanderRow(title=f"{o.get('make', '')} {o.get('model', '')}".strip() or name,
+                                  subtitle=name)
+            modes = o.get("modes", [])
+            labels = [f"{m['width']}×{m['height']} @ {m['refresh_rate'] / 1000:.0f} Hz" for m in modes]
+            mrow = Adw.ComboRow(title="Resolution", model=Gtk.StringList.new(labels or ["—"]))
+            if o.get("current_mode") is not None and modes:
+                mrow.set_selected(o["current_mode"])
+            mrow.connect("notify::selected", self.on_mode, name, modes)
+            exp.add_row(mrow)
+            scale = (o.get("logical") or {}).get("scale", 1.0)
+            srow = Adw.SpinRow.new_with_range(0.5, 3.0, 0.25)
+            srow.set_title("Scale")
+            srow.set_value(scale)
+            srow.connect("notify::value", self.on_scale, name)
+            exp.add_row(srow)
+            g.add(exp)
+        page.add(g)
+        return page
+
+    def on_mode(self, row, _p, name, modes):
+        if not modes:
+            return
+        m = modes[row.get_selected()]
+        mode = f"{m['width']}x{m['height']}@{m['refresh_rate'] / 1000:.3f}"
+        niri_update(outputs={name: {**niri_block_get().get("outputs", {}).get(name, {}), "mode": mode}})
+        self.toast(f"{name}: {m['width']}×{m['height']}")
+
+    def on_scale(self, row, _p, name):
+        v = round(row.get_value(), 2)
+        niri_update(outputs={name: {**niri_block_get().get("outputs", {}).get(name, {}), "scale": v}})
+
+    # -------------------------------------------------------------- Som
+    def page_sound(self):
+        page = self.prefs_page()
+        g = Adw.PreferencesGroup(title="Output")
+        self.vol_row = Adw.ActionRow(title="Volume")
+        self.vol = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 1)
+        self.vol.set_hexpand(True)
+        self.vol.set_size_request(280, -1)
+        self.vol.set_valign(Gtk.Align.CENTER)
+        self.mute = Gtk.ToggleButton(icon_name="audio-volume-muted-symbolic", valign=Gtk.Align.CENTER,
+                                     css_classes=["flat"], tooltip_text="Mute")
+        self.vol_row.add_suffix(self.vol)
+        self.vol_row.add_suffix(self.mute)
+        g.add(self.vol_row)
+        self.sinks_row = Adw.ComboRow(title="Output device")
+        g.add(self.sinks_row)
+        page.add(g)
+        g2 = Adw.PreferencesGroup()
+        more = Adw.ActionRow(title="Advanced sound settings", subtitle="Per-app volume, inputs and devices",
+                             activatable=True)
+        more.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+        more.connect("activated", lambda *_: subprocess.Popen(["pavucontrol"]))
+        g2.add(more)
+        page.add(g2)
+        self.refresh_sound()
+        self.vol.connect("value-changed", lambda s: run(
+            ["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{int(s.get_value())}%"]))
+        self.mute.connect("toggled", lambda b: run(
+            ["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "1" if b.get_active() else "0"]))
+        return page
+
+    def refresh_sound(self):
+        out = run(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"])
+        m = re.search(r"Volume:\s*([\d.]+)", out)
+        if m:
+            self.vol.set_value(float(m.group(1)) * 100)
+        self.mute.set_active("MUTED" in out)
+        sinks, self.sink_ids, cur = [], [], 0
+        sec = False
+        for line in run(["wpctl", "status"]).splitlines():
+            if "Sinks:" in line:
+                sec = True
+                continue
+            if sec:
+                mm = re.match(r"[\s│├└─]*(\*)?\s*(\d+)\.\s+(.+?)(\s+\[vol:.*)?$", line)
+                if not mm:
+                    if line.strip(" │") == "" or ":" in line:
+                        sec = False
+                    continue
+                if mm.group(1):
+                    cur = len(sinks)
+                sinks.append(mm.group(3).strip())
+                self.sink_ids.append(mm.group(2))
+        self.sinks_row.set_model(Gtk.StringList.new(sinks or ["No output devices"]))
+        self.sinks_row.set_selected(cur)
+        self.sinks_row.connect("notify::selected", lambda r, _p: self.sink_ids and run(
+            ["wpctl", "set-default", self.sink_ids[r.get_selected()]]))
+
+    # -------------------------------------------------------------- Rede
+    def page_network(self):
+        page = self.prefs_page()
+        self.net_group = Adw.PreferencesGroup(title="Wi-Fi")
+        sw = Gtk.Switch(valign=Gtk.Align.CENTER)
+        sw.set_active("enabled" in run(["nmcli", "radio", "wifi"]))
+        sw.connect("notify::active", lambda s, _p: run(["nmcli", "radio", "wifi", "on" if s.get_active() else "off"]))
+        self.net_group.set_header_suffix(sw)
+        page.add(self.net_group)
+        self.net_rows = []
+        gw = Adw.PreferencesGroup(title="Connections")
+        cur = Adw.ActionRow(title="Active connection")
+        active = [l.split(":") for l in run(["nmcli", "-t", "-f", "NAME,TYPE", "con", "show", "--active"]).splitlines()]
+        active = [a for a in active if len(a) == 2 and a[1] != "loopback"]
+        cur.set_subtitle(", ".join(a[0] for a in active) or "Not connected")
+        gw.add(cur)
+        adv = Adw.ActionRow(title="Advanced network settings", subtitle="VPN, wired, proxies", activatable=True)
+        adv.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+        adv.connect("activated", lambda *_: subprocess.Popen(["nm-connection-editor"]))
+        gw.add(adv)
+        page.add(gw)
+        self.scan_wifi()
+        return page
+
+    def scan_wifi(self):
+        def work():
+            out = run(["nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "dev", "wifi", "list"], timeout=15)
+            GLib.idle_add(self.fill_wifi, out)
+        threading.Thread(target=work, daemon=True).start()
+
+    def fill_wifi(self, out):
+        for r in self.net_rows:
+            self.net_group.remove(r)
+        self.net_rows = []
+        seen = set()
+        for line in out.splitlines():
+            parts = re.split(r"(?<!\\):", line)
+            if len(parts) < 4 or not parts[1] or parts[1] in seen:
+                continue
+            seen.add(parts[1])
+            inuse, ssid, sig, sec = parts[0] == "*", parts[1].replace("\\:", ":"), int(parts[2] or 0), parts[3]
+            row = Adw.ActionRow(title=ssid, subtitle=("Connected · " if inuse else "") + (sec or "Open"),
+                                activatable=not inuse)
+            icon = "network-wireless-signal-" + ("excellent" if sig > 75 else "good" if sig > 50
+                                                 else "ok" if sig > 25 else "weak") + "-symbolic"
+            row.add_prefix(Gtk.Image.new_from_icon_name(icon))
+            if not inuse:
+                row.connect("activated", self.connect_wifi, ssid, bool(sec))
+            self.net_group.add(row)
+            self.net_rows.append(row)
+        if not self.net_rows:
+            row = Adw.ActionRow(title="No Wi-Fi networks found")
+            self.net_group.add(row)
+            self.net_rows.append(row)
+        return False
+
+    def connect_wifi(self, _row, ssid, secured):
+        if not secured:
+            threading.Thread(target=lambda: (run(["nmcli", "dev", "wifi", "connect", ssid], 40),
+                                             GLib.idle_add(self.scan_wifi)), daemon=True).start()
+            return
+        dlg = Adw.AlertDialog(heading=f"Connect to “{ssid}”", body="Enter the network password")
+        entry = Gtk.PasswordEntry(show_peek_icon=True)
+        dlg.set_extra_child(entry)
+        dlg.add_response("cancel", "Cancel")
+        dlg.add_response("connect", "Connect")
+        dlg.set_response_appearance("connect", Adw.ResponseAppearance.SUGGESTED)
+
+        def resp(_d, r):
+            if r == "connect":
+                pw = entry.get_text()
+                self.toast(f"Connecting to {ssid}…")
+
+                def work():
+                    out = run(["nmcli", "dev", "wifi", "connect", ssid, "password", pw], 40)
+                    GLib.idle_add(self.toast, "Connected" if "successfully" in out else "Could not connect")
+                    GLib.idle_add(self.scan_wifi)
+                threading.Thread(target=work, daemon=True).start()
+        dlg.connect("response", resp)
+        dlg.present(self)
+
+    # -------------------------------------------------------------- Teclado
+    def page_keyboard(self):
+        page = self.prefs_page()
+        g = Adw.PreferencesGroup(title="Keyboard layout",
+                                 description="Used by Nexora Flow. The login screen and Xfce keep the layout chosen at install.")
+        cur = niri_block_get().get("layout") or self.current_layout()
+        row = Adw.ComboRow(title="Layout", model=Gtk.StringList.new([k[0] for k in KEYMAPS]))
+        row.set_selected(next((i for i, k in enumerate(KEYMAPS) if k[1] == cur), 0))
+        row.connect("notify::selected", lambda r, _p: (niri_update(layout=KEYMAPS[r.get_selected()][1]),
+                                                       self.toast("Keyboard layout changed")))
+        g.add(row)
+        page.add(g)
+        g2 = Adw.PreferencesGroup(title="Shortcuts")
+        for keys, what in (("Super + Space", "Apps"), ("Super + Return", "Terminal"), ("Super + E", "Files"),
+                           ("Super + B", "Firefox"), ("Super + O", "Overview"), ("Super + Q", "Close window"),
+                           ("Super + ← / →", "Move along the strip"), ("Super + 1…5", "Workspaces"),
+                           ("Super + Shift + /", "All shortcuts")):
+            r = Adw.ActionRow(title=what)
+            r.add_suffix(Gtk.Label(label=keys, css_classes=["dim-label"]))
+            g2.add(r)
+        page.add(g2)
+        return page
+
+    def current_layout(self):
+        for p in (NIRI_USER, NIRI_SYS):
+            try:
+                m = re.search(r'\n\s*layout "([a-z]+)"', open(p).read())
+                if m:
+                    return m.group(1)
+            except OSError:
+                pass
+        return "pt"
+
+    # -------------------------------------------------------------- Acerca
+    def page_about(self):
+        page = self.prefs_page()
+        g = Adw.PreferencesGroup()
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8, margin_bottom=12)
+        logo = Gtk.Image.new_from_icon_name("nexora")
+        logo.set_pixel_size(96)
+        box.append(logo)
+        box.append(Gtk.Label(label="Nexora Linux", css_classes=["title-1"]))
+        ver = "13.1"
+        try:
+            for line in open("/etc/os-release"):
+                if line.startswith("VERSION="):
+                    ver = line.split("=", 1)[1].strip().strip('"')
+        except OSError:
+            pass
+        box.append(Gtk.Label(label=f"Version {ver}", css_classes=["dim-label"]))
+        g.add(box)
+        page.add(g)
+        g2 = Adw.PreferencesGroup(title="System")
+        cpu = ""
+        try:
+            cpu = next(l.split(":", 1)[1].strip() for l in open("/proc/cpuinfo") if l.startswith("model name"))
+        except (OSError, StopIteration):
+            pass
+        mem = 0
+        try:
+            mem = int(next(l.split()[1] for l in open("/proc/meminfo") if l.startswith("MemTotal"))) / 1024 / 1024
+        except (OSError, StopIteration):
+            pass
+        st = os.statvfs("/")
+        disk = st.f_blocks * st.f_frsize / 1e9
+        free = st.f_bavail * st.f_frsize / 1e9
+        gpu = ""
+        for l in run(["glxinfo", "-B"]).splitlines():
+            if "Device:" in l or "OpenGL renderer string" in l:
+                gpu = l.split(":", 1)[1].strip()
+                break
+        for title, val in (("Processor", cpu or "—"), ("Memory", f"{mem:.1f} GB"), ("Graphics", gpu or "—"),
+                           ("Disk", f"{free:.0f} GB free of {disk:.0f} GB"),
+                           ("Kernel", os.uname().release),
+                           ("Session", "Nexora Flow (niri)" if in_niri() else os.environ.get("XDG_CURRENT_DESKTOP", "—"))):
+            r = Adw.ActionRow(title=title, subtitle=val)
+            r.set_subtitle_selectable(True)
+            g2.add(r)
+        page.add(g2)
+        return page
+
+
+class App(Adw.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.page = None
+
+    def do_command_line(self, cmd):
+        args = cmd.get_arguments()[1:]
+        self.page = args[0] if args else None
+        self.activate()
+        return 0
+
+    def do_activate(self):
+        win = self.props.active_window or Settings(self)
+        if self.page and self.page in win.rows:
+            win.stack.set_visible_child_name(self.page)
+            win.content_page.set_title(win.rows[self.page])
+        win.present()
+
+
+if __name__ == "__main__":
+    sys.exit(App().run(sys.argv))

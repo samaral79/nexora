@@ -1,8 +1,8 @@
 [Desktop Entry]
 Type=Application
-Name=Instalar a Nexora Linux
-GenericName=Instalador
-Comment=Instala a Nexora Linux no disco
+Name=Install Nexora Linux
+GenericName=Installer
+Comment=Install Nexora Linux to disk
 Exec=nexora-installer
 Icon=nexora
 Terminal=false

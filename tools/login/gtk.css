@@ -1,0 +1,100 @@
+/* Nexora — ecrã de login (lightdm-gtk-greeter). Tema "Nexora-Login": o Nexora (escuro) + este cartão. */
+@import url("../../Nexora/gtk-3.0/gtk-dark.css");
+
+@define-color nx_cyan #22b8cf;
+@define-color nx_violet #7b5cff;
+
+/* barra de cima: transparente, só texto */
+#panel_window,
+#panel_window menubar,
+#panel_window menubar > menuitem {
+  background: transparent;
+  box-shadow: none;
+  border: none;
+  color: rgba(230, 238, 243, 0.85);
+}
+#panel_window menubar > menuitem:hover { background: rgba(255, 255, 255, 0.08); border-radius: 8px; }
+#panel_window { padding: 6px 10px; }
+#clock_label { font-weight: 700; }
+
+/* o cartão do login */
+#login_window {
+  background-color: rgba(10, 18, 30, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 24px;
+  box-shadow: none;   /* a sombra sai cortada em retângulo pela janela do greeter */
+  padding: 10px;
+}
+#login_window #content_frame,
+#login_window #buttonbox_frame {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+#content_frame { padding: 18px 26px 4px 26px; }
+#buttonbox_frame { padding: 2px 26px 22px 26px; }
+
+#user_image { padding: 4px; border-radius: 99px; }
+#user_image_border { background: transparent; border: none; }
+
+#user_combobox,
+#user_combobox button,
+#user_combobox * {
+  font-size: 14pt;
+  font-weight: 600;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  color: #e6eef3;
+}
+
+#login_window entry,
+#password_entry,
+#username_entry {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
+  caret-color: @nx_cyan;
+  box-shadow: none;
+}
+#login_window entry:focus { border-color: @nx_cyan; background-color: rgba(34, 184, 207, 0.10); }
+
+#login_button,
+#login_window button#login_button,
+#login_window button#login_button.suggested-action {
+  min-height: 38px;
+  padding: 0 22px;
+  border-radius: 12px;
+  border: none;
+  font-weight: 700;
+  color: #ffffff;
+  background-color: transparent;
+  background-image: linear-gradient(135deg, @nx_cyan, @nx_violet);
+  box-shadow: none;
+  text-shadow: none;
+}
+#login_button:hover,
+#login_window button#login_button:hover { background-image: linear-gradient(135deg, shade(@nx_cyan, 1.12), shade(@nx_violet, 1.12)); }
+#cancel_button {
+  min-height: 38px;
+  border-radius: 12px;
+  border: none;
+  background: rgba(255, 255, 255, 0.07);
+  color: #e6eef3;
+}
+
+#greeter_infobar { border-radius: 12px; }
+#message_label { color: #ff8a80; }
+
+/* menus (sessão, energia, idioma) */
+menu, .menu, .context-menu {
+  background-color: rgba(14, 24, 38, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  padding: 6px;
+}
+menu menuitem { border-radius: 8px; padding: 6px 10px; }
+menu menuitem:hover { background-color: rgba(34, 184, 207, 0.22); }

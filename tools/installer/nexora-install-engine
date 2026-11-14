@@ -24,7 +24,7 @@ step()  { say "STEP $1 $TOTAL $2"; }
 prog()  { say "PROGRESS $1"; }
 log()   { say "LOG $*"; }
 fail()  { say "ERROR $*"; cleanup; exit 1; }
-trap 'fail "falhou na linha $LINENO: $BASH_COMMAND"' ERR
+trap 'fail "failed at line $LINENO: $BASH_COMMAND"' ERR
 
 cleanup() {
     trap - ERR
@@ -33,32 +33,32 @@ cleanup() {
     done
 }
 
-[ "$EUID" -eq 0 ] || { echo "ERROR é preciso root"; exit 1; }
+[ "$EUID" -eq 0 ] || { echo "ERROR must run as root"; exit 1; }
 CONF=${1:?ficheiro de configuração em falta}
 # shellcheck disable=SC1090
 source "$CONF"
 IFS= read -r PASSWORD || true
 
-[ "${CONFIRM:-}" = yes ] || fail "falta CONFIRM=yes"
-[ -b "$DISK" ] || fail "$DISK não é um disco"
-[ -d "$SRC/usr/bin" ] || fail "não encontro o sistema em $SRC (estás no live?)"
-[[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail "nome de utilizador inválido: $USERNAME"
-[ -n "$PASSWORD" ] || fail "senha vazia"
-[ -e "/usr/share/zoneinfo/$TIMEZONE" ] || fail "fuso horário desconhecido: $TIMEZONE"
+[ "${CONFIRM:-}" = yes ] || fail "missing CONFIRM=yes"
+[ -b "$DISK" ] || fail "$DISK is not a disk"
+[ -d "$SRC/usr/bin" ] || fail "system not found at $SRC (are you in the live session?)"
+[[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail "invalid username: $USERNAME"
+[ -n "$PASSWORD" ] || fail "empty password"
+[ -e "/usr/share/zoneinfo/$TIMEZONE" ] || fail "unknown time zone: $TIMEZONE"
 
 # nunca instalar por cima do próprio live
 LIVEDEV=$(findmnt -no SOURCE /run/live/medium 2>/dev/null || true)
 if [ -n "$LIVEDEV" ]; then
     LIVEDISK=/dev/$(lsblk -no PKNAME "$LIVEDEV" 2>/dev/null | head -1)
     [ "$LIVEDISK" = /dev/ ] && LIVEDISK=$LIVEDEV
-    [ "$DISK" != "$LIVEDISK" ] && [ "$DISK" != "$LIVEDEV" ] || fail "$DISK é o disco de onde o live arrancou"
+    [ "$DISK" != "$LIVEDISK" ] && [ "$DISK" != "$LIVEDEV" ] || fail "$DISK is the disk the live session booted from"
 fi
 
 part() { case "$DISK" in *nvme*|*mmcblk*|*loop*) echo "${DISK}p$1" ;; *) echo "${DISK}$1" ;; esac; }
 P1=$(part 1); P2=$(part 2); P3=$(part 3)
 
 # ---------------------------------------------------------------- 1. partições
-step 1 "A preparar o disco $DISK"
+step 1 "Preparing disk $DISK"
 prog 2
 cleanup
 for p in $(lsblk -lnpo NAME "$DISK" | tail -n +2); do umount -l "$p" 2>/dev/null || true; swapoff "$p" 2>/dev/null || true; done
@@ -72,12 +72,12 @@ EOF
 partx -u "$DISK" 2>/dev/null || true
 udevadm settle 2>/dev/null || true
 for i in $(seq 50); do [ -b "$P3" ] && break; sleep 0.2; done
-[ -b "$P3" ] || fail "as partições novas não apareceram"
-log "partições criadas: $P1 $P2 $P3"
+[ -b "$P3" ] || fail "the new partitions did not show up"
+log "partitions created: $P1 $P2 $P3"
 prog 5
 
 # ---------------------------------------------------------------- 2. sistemas de ficheiros
-step 2 "A formatar"
+step 2 "Formatting"
 mkfs.vfat -F 32 -n NEXORA_ESP "$P2" >/dev/null
 mkfs.ext4 -F -q -L nexora "$P3"
 mkdir -p $T
@@ -87,7 +87,7 @@ mount "$P2" $T/boot/efi
 prog 8
 
 # ---------------------------------------------------------------- 3. copiar o sistema
-step 3 "A copiar a Nexora para o disco"
+step 3 "Copying Nexora to disk"
 rsync -aHAX --numeric-ids --no-inc-recursive --info=progress2 \
       --exclude=/dev/ --exclude=/proc/ --exclude=/sys/ --exclude=/run/ --exclude=/tmp/ \
       --exclude=/boot/efi/ --exclude=/home/nexora/ --exclude=/lost+found/ \
@@ -97,13 +97,13 @@ rsync -aHAX --numeric-ids --no-inc-recursive --info=progress2 \
             echo "PROGRESS $(( 8 + ${BASH_REMATCH[1]} * 72 / 100 ))"
         fi
     done
-[ "${PIPESTATUS[0]}" -eq 0 ] || fail "a cópia falhou"
+[ "${PIPESTATUS[0]}" -eq 0 ] || fail "copy failed"
 mkdir -p $T/{dev,proc,sys,run,tmp,home}
 chmod 1777 $T/tmp
 prog 80
 
 # ---------------------------------------------------------------- 4. configurar
-step 4 "A configurar o sistema"
+step 4 "Configuring the system"
 mount --bind /dev $T/dev
 mount --bind /dev/pts $T/dev/pts
 mount -t proc proc $T/proc
@@ -147,7 +147,7 @@ esac
 printf '[Seat:*]\nuser-session=%s\n' "$SESSION" > $T/etc/lightdm/lightdm.conf.d/50-nexora-session.conf
 # o teclado do Nexora Flow (o niri não lê o xorg.conf.d)
 [ -f $T/etc/niri/config.kdl ] && sed -i "s/^\( *layout\) \"[a-z]*\"/\1 \"$XKBLAYOUT\"/" $T/etc/niri/config.kdl
-log "ambiente por omissão: $SESSION"
+log "default session: $SESSION"
 
 # tirar tudo o que é só do live
 if [ -f $T/etc/nexora-live ]; then
@@ -164,22 +164,31 @@ if in_t getent passwd "$USERNAME" >/dev/null; then in_t userdel -r "$USERNAME" |
 in_t useradd -m -c "$FULLNAME" -G wheel,video,audio,input,users -s /bin/bash "$USERNAME"
 printf '%s:%s\n' "$USERNAME" "$PASSWORD" | in_t chpasswd
 in_t passwd -l root >/dev/null      # root bloqueado: administra-se com sudo (grupo wheel)
-log "utilizador $USERNAME criado"
+log "user $USERNAME created"
+# a sessão escolhida fica guardada para o utilizador (o greeter dá prioridade à sessão
+# do utilizador e ao seu próprio estado, por isso limpa-se o que veio da imagem)
+rm -rf $T/var/lib/lightdm/.cache/lightdm-gtk-greeter $T/var/cache/lightdm/dmrc/*
+printf '[Desktop]\nSession=%s\n' "$SESSION" > $T/home/$USERNAME/.dmrc
+in_t chown "$USERNAME:" /home/$USERNAME/.dmrc
+mkdir -p $T/var/cache/lightdm/dmrc
+cp $T/home/$USERNAME/.dmrc $T/var/cache/lightdm/dmrc/$USERNAME.dmrc
+# no sistema instalado o instalador já não faz sentido nos menus
+rm -f $T/usr/share/applications/nexora-installer.desktop
 prog 85
 
 # ---------------------------------------------------------------- 5. arranque
-step 5 "A instalar o GRUB"
+step 5 "Installing GRUB"
 KERNEL=$(cd $T/boot && ls vmlinuz-* | sort -V | tail -1)
 if [ -d /sys/firmware/efi ]; then
     mount -t efivarfs efivarfs $T/sys/firmware/efi/efivars 2>/dev/null || true
     in_t grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=Nexora --recheck \
-        >/dev/null 2>&1 && log "GRUB UEFI instalado (entrada Nexora)" || log "aviso: entrada UEFI não criada"
+        >/dev/null 2>&1 && log "GRUB UEFI installed (Nexora entry)" || log "warning: UEFI boot entry not created"
 fi
 # cópia "removível" (firmwares que ignoram a NVRAM) + BIOS no mesmo disco
 in_t grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable --no-nvram >/dev/null 2>&1 \
-    && log "GRUB UEFI (removível) instalado" || log "aviso: GRUB UEFI removível falhou"
+    && log "GRUB UEFI (removable) installed" || log "warning: removable GRUB UEFI failed"
 in_t grub-install --target=i386-pc "$DISK" >/dev/null 2>&1 \
-    && log "GRUB BIOS instalado" || log "aviso: GRUB BIOS falhou"
+    && log "GRUB BIOS installed" || log "warning: GRUB BIOS failed"
 cat > $T/boot/grub/grub.cfg << EOF
 # gerado pelo instalador da Nexora
 set default=0
@@ -195,16 +204,16 @@ set menu_color_highlight=black/cyan
 menuentry "Nexora Linux" {
         linux   /boot/$KERNEL root=PARTUUID=$ROOT_PARTUUID ro quiet loglevel=3
 }
-menuentry "Nexora Linux (modo de recuperação)" {
+menuentry "Nexora Linux (recovery mode)" {
         linux   /boot/$KERNEL root=PARTUUID=$ROOT_PARTUUID ro systemd.unit=rescue.target
 }
 EOF
 prog 95
 
 # ---------------------------------------------------------------- 6. fim
-step 6 "A terminar"
+step 6 "Finishing"
 sync
 cleanup
 prog 100
-step 7 "Instalação concluída"
+step 7 "Installation complete"
 say DONE
