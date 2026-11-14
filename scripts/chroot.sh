@@ -39,6 +39,7 @@ cp "$(dirname "$0")"/build/*.sh "$(dirname "$0")"/blfs/*.sh $DEST/
 mkdir -p $DEST/installer && cp -a "$(dirname "$0")"/../tools/installer/. $DEST/installer/
 mkdir -p $DEST/flow && cp -a "$(dirname "$0")"/../tools/flow/. $DEST/flow/
 mkdir -p $DEST/login && cp -a "$(dirname "$0")"/../tools/login/. $DEST/login/
+mkdir -p $DEST/aur && cp -a "$(dirname "$0")"/../tools/aur/. $DEST/aur/
 
 ENV=(HOME=/root TERM="$TERM" PS1='(nexora chroot) \u:\w\$ '
      PATH=/usr/bin:/usr/sbin MAKEFLAGS="-j${NX_JOBS:-$(nproc)}" TESTSUITEFLAGS="-j${NX_JOBS:-$(nproc)}"

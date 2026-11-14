@@ -1,0 +1,351 @@
+#!/bin/bash
+# nexora-aur — o AUR na Nexora, isolado num contentor Arch.
+#
+# O Arch vive em /var/lib/nexora-aur/arch e nunca toca no /usr da Nexora:
+#   - instalar/atualizar/remover corre como root dentro do contentor (systemd-nspawn), com o yay;
+#   - as apps correm como tu, numa sandbox (bwrap) com o Arch só de leitura, a tua pasta pessoal,
+#     o ecrã (Wayland/X11), o som (PipeWire) e a GPU;
+#   - as apps instaladas aparecem no menu e no terminal (exportadas para /var/lib/nexora-aur/exports).
+# Se algo correr mal, "nexora-aur destroy" apaga o contentor e o sistema fica como estava.
+set -euo pipefail
+
+DIR=${NX_AUR_DIR:-/var/lib/nexora-aur}
+ROOT=$DIR/arch
+EXP=$DIR/exports
+MIRROR=${NX_AUR_MIRROR:-https://geo.mirror.pkgbuild.com}
+SELF=$(readlink -f "$0")
+BASE_PKGS=(base-devel git sudo mesa vulkan-radeon vulkan-intel libva-mesa-driver noto-fonts ttf-dejavu
+           xdg-utils hicolor-icon-theme)
+
+B=$'\e[1m' C=$'\e[36m' G=$'\e[32m' R=$'\e[31m' Y=$'\e[33m' N=$'\e[0m'
+[ -t 1 ] || B= C= G= R= Y= N=
+msg()  { printf '%s==>%s %s%s%s\n' "$C" "$N" "$B" "$*" "$N"; }
+ok()   { printf '%s✔%s %s\n' "$G" "$N" "$*"; }
+warn() { printf '%s!%s %s\n' "$Y" "$N" "$*" >&2; }
+die()  { printf '%s✘%s %s\n' "$R" "$N" "$*" >&2; exit 1; }
+
+usage() {
+    cat << EOF
+${B}nexora-aur${N} — instala apps do AUR sem mexer no sistema (num contentor Arch isolado)
+
+  nexora-aur setup              prepara o contentor (uma vez, ~1 GB, uns minutos)
+  nexora-aur install PACOTE...  instala do AUR (ou dos repositórios do Arch)
+  nexora-aur remove PACOTE...   remove
+  nexora-aur update             atualiza tudo o que está no contentor
+  nexora-aur search TERMO       procura no AUR e no Arch
+  nexora-aur list               o que instalaste
+  nexora-aur run COMANDO...     corre um comando do contentor (é o que os atalhos do menu usam)
+  nexora-aur shell              abre um terminal dentro do contentor
+  nexora-aur destroy            apaga o contentor e tudo o que lá está
+
+As apps instaladas aparecem no menu com "(AUR)" no nome.
+EOF
+}
+
+# ------------------------------------------------------------------ utilitários
+need_root() {
+    if [ "$EUID" -ne 0 ]; then
+        command -v pkexec > /dev/null || die "precisa de root (falta o pkexec)"
+        exec pkexec "$SELF" "$@"
+    fi
+}
+
+ready() { [ -x "$ROOT/usr/bin/yay" ]; }
+# os pacotes descarregados e as compilações já não fazem falta depois de instalados
+clean_cache() {
+    rm -rf "${1:-$ROOT}"/var/cache/pacman/pkg/* "${1:-$ROOT}"/var/lib/aurbuild/.cache/yay/*
+}
+ensure() { ready || die "o contentor ainda não existe — corre primeiro: nexora-aur setup"; }
+
+# systemd-nspawn sobre uma árvore (root dentro do contentor)
+nsp_in() {
+    local tree=$1
+    shift
+    systemd-nspawn -q --register=no --link-journal=no --timezone=off --resolv-conf=copy-host \
+        --console="$([ -t 0 ] && echo interactive || echo pipe)" -D "$tree" "$@"
+}
+nsp() { nsp_in "$ROOT" "$@"; }
+# como o utilizador de compilação (o makepkg/yay não aceitam root)
+as_builder() {
+    nsp -u aurbuild --chdir=/var/lib/aurbuild --setenv=HOME=/var/lib/aurbuild --setenv=LANG=C.UTF-8 "$@"
+}
+
+# ------------------------------------------------------------------ setup
+cmd_setup() {
+    need_root setup
+    if ready; then
+        ok "o contentor já está pronto em $ROOT"
+        return
+    fi
+    for c in systemd-nspawn bwrap curl zstd tar; do
+        command -v $c > /dev/null || die "falta o $c"
+    done
+    mkdir -p "$DIR"
+    local part=$DIR/arch.part dl
+    dl=$(mktemp -d "$DIR/.dl.XXXXXX")
+    # shellcheck disable=SC2064
+    trap "rm -rf '$dl'" EXIT
+    rm -rf "$part"
+
+    msg "A descarregar o Arch Linux (bootstrap)"
+    local url=$MIRROR/iso/latest f=archlinux-bootstrap-x86_64.tar.zst
+    curl -fL --progress-bar -o "$dl/$f" "$url/$f"
+    curl -fsSL -o "$dl/sha256sums.txt" "$url/sha256sums.txt"
+    (cd "$dl" && grep "  $f\$" sha256sums.txt | sha256sum -c --quiet -) || die "o ficheiro descarregado não bate certo"
+    ok "soma SHA-256 confere"
+    # assinatura do Arch (se der para obter a chave pelo WKD; senão fica a soma acima)
+    if command -v gpg > /dev/null && curl -fsSL -o "$dl/$f.sig" "$url/$f.sig"; then
+        export GNUPGHOME=$dl/gnupg
+        mkdir -m700 "$GNUPGHOME"
+        if gpg -q --auto-key-locate clear,wkd --locate-external-keys pierre@archlinux.org > /dev/null 2>&1; then
+            gpg -q --verify "$dl/$f.sig" "$dl/$f" 2> /dev/null || die "a assinatura do Arch NÃO confere"
+            ok "assinatura do Arch confere"
+        else
+            warn "não consegui obter a chave do Arch; fico pela soma SHA-256"
+        fi
+        unset GNUPGHOME
+    fi
+
+    msg "A extrair"
+    tar --zstd -xpf "$dl/$f" --numeric-owner -C "$dl"
+    mv "$dl/root.x86_64" "$part"
+    rm -f "$dl/$f"
+
+    msg "A configurar o pacman"
+    printf 'Server = %s/$repo/os/$arch\nServer = https://fastly.mirror.pkgbuild.com/$repo/os/$arch\n' "$MIRROR" \
+        > "$part/etc/pacman.d/mirrorlist"
+    sed -i -e 's/^#Color/Color/' -e 's/^#\?ParallelDownloads.*/ParallelDownloads = 5/' \
+           -e 's/^CheckSpace/#CheckSpace/' "$part/etc/pacman.conf"
+    # o pacman 7 isola os downloads com Landlock; sem ele no kernel (o da Nexora não o tem) falha
+    # tudo. O contentor já está isolado do sistema, por isso aí desliga-se essa sandbox do pacman.
+    grep -qw landlock /sys/kernel/security/lsm 2> /dev/null \
+        || sed -i '/^\[options\]/a DisableSandbox' "$part/etc/pacman.conf"
+    sed -i -e 's/^#\(en_US.UTF-8 UTF-8\)/\1/' -e 's/^#\(pt_PT.UTF-8 UTF-8\)/\1/' "$part/etc/locale.gen"
+    echo 'LANG=C.UTF-8' > "$part/etc/locale.conf"
+    # pontos de montagem que a sandbox das apps usa (o Arch fica só de leitura)
+    for e in resolv.conf hosts localtime machine-id hostname; do
+        [ -e "$part/etc/$e" ] || [ -L "$part/etc/$e" ] || touch "$part/etc/$e"
+        if [ -L "$part/etc/$e" ]; then rm -f "$part/etc/$e"; touch "$part/etc/$e"; fi
+    done
+    # letras da Nexora dentro do contentor
+    install -d "$part/etc/fonts"
+    cat > "$part/etc/fonts/local.conf" << "EOF"
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "fonts.dtd">
+<fontconfig>
+  <dir>/run/host/fonts</dir>
+</fontconfig>
+EOF
+    # compilar sem pacotes de debug e com todos os núcleos
+    install -d "$part/etc/makepkg.conf.d"
+    cat > "$part/etc/makepkg.conf.d/nexora.conf" << "EOF"
+MAKEFLAGS="-j$(nproc)"
+OPTIONS+=(!debug)
+EOF
+
+    msg "A instalar a base (base-devel, git, Mesa, letras...)"
+    nsp_in "$part" /bin/bash -c "pacman-key --init && pacman-key --populate archlinux \
+        && pacman -Syu --noconfirm --needed ${BASE_PKGS[*]} && locale-gen"
+    nsp_in "$part" useradd -m -d /var/lib/aurbuild -s /bin/bash aurbuild
+    echo 'aurbuild ALL=(ALL:ALL) NOPASSWD: ALL' > "$part/etc/sudoers.d/10-aurbuild"
+    chmod 440 "$part/etc/sudoers.d/10-aurbuild"
+
+    msg "A compilar o yay (o ajudante do AUR)"
+    nsp_in "$part" -u aurbuild --chdir=/var/lib/aurbuild --setenv=HOME=/var/lib/aurbuild /bin/bash -c \
+        'set -e; rm -rf /tmp/yay-bin; git clone -q --depth 1 https://aur.archlinux.org/yay-bin.git /tmp/yay-bin;
+         cd /tmp/yay-bin; makepkg -si --noconfirm; rm -rf /tmp/yay-bin'
+    # o que vem de base não aparece no menu nem em "list"
+    nsp_in "$part" pacman -Qqe > "$DIR/base.list"
+    clean_cache "$part"
+    mv "$part" "$ROOT"
+    cmd_export
+    ok "Pronto! Experimenta: nexora-aur install <pacote>"
+}
+
+# ------------------------------------------------------------------ pacotes
+yay_flags() {
+    # num terminal o yay pergunta (dá para rever o PKGBUILD); sem terminal vai sem perguntas
+    [ -t 0 ] || echo "--noconfirm --answerdiff None --answerclean None --answeredit None"
+}
+
+cmd_install() {
+    [ $# -gt 0 ] || die "diz que pacote: nexora-aur install PACOTE"
+    need_root install "$@"
+    ensure
+    # shellcheck disable=SC2046
+    as_builder yay -S --needed --removemake $(yay_flags) "$@"
+    clean_cache
+    cmd_export
+}
+
+cmd_remove() {
+    [ $# -gt 0 ] || die "diz que pacote: nexora-aur remove PACOTE"
+    need_root remove "$@"
+    ensure
+    local base
+    for p in "$@"; do
+        grep -qxF "$p" "$DIR/base.list" && die "$p faz parte da base do contentor; não o removo"
+    done
+    base=$([ -t 0 ] || echo --noconfirm)
+    # shellcheck disable=SC2086
+    nsp pacman -Rns $base "$@"
+    cmd_export
+}
+
+cmd_update() {
+    need_root update
+    ensure
+    # shellcheck disable=SC2046
+    as_builder yay -Syu --removemake $(yay_flags)
+    clean_cache
+    cmd_export
+}
+
+cmd_search() {
+    [ $# -gt 0 ] || die "diz o que procurar: nexora-aur search TERMO"
+    ensure
+    [ "$EUID" -eq 0 ] && { as_builder yay -Ss "$@"; return; }
+    XDG_CACHE_HOME=${XDG_RUNTIME_DIR:-/tmp}/nexora-aur/cache run_box yay -Ss "$@"
+}
+
+cmd_list() {
+    ensure
+    local d name ver reason
+    printf '%sInstalado por ti no contentor:%s\n' "$B" "$N"
+    for d in "$ROOT"/var/lib/pacman/local/*/; do
+        [ -f "$d/desc" ] || continue
+        grep -qx '%REASON%' "$d/desc" && continue
+        name=$(sed -n '/^%NAME%$/{n;p;q}' "$d/desc")
+        ver=$(sed -n '/^%VERSION%$/{n;p;q}' "$d/desc")
+        grep -qxF "$name" "$DIR/base.list" && continue
+        reason=Arch
+        grep -q '^%PACKAGER%$' "$d/desc" && sed -n '/^%PACKAGER%$/{n;p;q}' "$d/desc" | grep -q '^Unknown Packager' && reason=AUR
+        printf '  %-32s %-20s %s\n' "$name" "$ver" "$reason"
+    done
+}
+
+# ------------------------------------------------------------------ exportar para o menu
+cmd_export() {
+    need_root export
+    [ -d "$ROOT" ] || return 0
+    local new=$EXP.new d name f rel
+    rm -rf "$new"
+    install -d "$new/bin" "$new/share/applications" "$new/share/icons" "$new/share/pixmaps"
+    for d in "$ROOT"/var/lib/pacman/local/*/; do
+        [ -f "$d/desc" ] && [ -f "$d/files" ] || continue
+        grep -qx '%REASON%' "$d/desc" && continue            # só o que pediste (não as dependências)
+        name=$(sed -n '/^%NAME%$/{n;p;q}' "$d/desc")
+        grep -qxF "$name" "$DIR/base.list" && continue
+        while IFS= read -r f; do
+            case $f in
+                */) ;;
+                usr/share/applications/*.desktop)
+                    # o atalho abre a app dentro do contentor
+                    sed -E -e 's|^Exec=|Exec=/usr/bin/nexora-aur run -- |' -e '/^TryExec=/d' \
+                           -e '/^DBusActivatable=/d' -e 's|^(Name(\[[^]]*\])?=.*)$|\1 (AUR)|' \
+                        "$ROOT/$f" > "$new/share/applications/${f##*/}" ;;
+                usr/bin/?*)
+                    [ -x "$ROOT/$f" ] || [ -L "$ROOT/$f" ] || continue
+                    printf '#!/bin/sh\n# %s do AUR (contentor da Nexora)\nexec /usr/bin/nexora-aur run -- /%s "$@"\n' \
+                        "$name" "$f" > "$new/bin/${f##*/}"
+                    chmod 755 "$new/bin/${f##*/}" ;;
+                usr/share/icons/* | usr/share/pixmaps/*)
+                    rel=${f#usr/share/}
+                    install -d "$new/share/${rel%/*}"
+                    cp -a "$ROOT/$f" "$new/share/$rel" ;;
+            esac
+        done < <(sed -n '/^%FILES%$/,/^$/p' "$d/files" | sed '1d;/^$/d')
+    done
+    # sem index.theme o tema hicolor desta pasta não é procurado
+    if [ -f "$ROOT/usr/share/icons/hicolor/index.theme" ]; then
+        install -d "$new/share/icons/hicolor"
+        cp "$ROOT/usr/share/icons/hicolor/index.theme" "$new/share/icons/hicolor/"
+    fi
+    command -v update-desktop-database > /dev/null && update-desktop-database -q "$new/share/applications" || true
+    command -v gtk-update-icon-cache > /dev/null && [ -d "$new/share/icons/hicolor" ] \
+        && gtk-update-icon-cache -qtf "$new/share/icons/hicolor" || true
+    rm -rf "$EXP.old"
+    [ -d "$EXP" ] && mv "$EXP" "$EXP.old"
+    mv "$new" "$EXP"
+    rm -rf "$EXP.old"
+}
+
+# ------------------------------------------------------------------ correr apps (como utilizador)
+run_box() {
+    ensure
+    [ "$EUID" -ne 0 ] || die "as apps do AUR correm como utilizador normal, não como root"
+    local rt=${XDG_RUNTIME_DIR:-/run/user/$UID} me grp ids
+    me=$(id -un)
+    grp=$(id -gn)
+    ids=$rt/nexora-aur
+    mkdir -p "$ids"
+    # o Arch não conhece o teu utilizador: junta-o aos ficheiros dele (só nesta sandbox)
+    { grep -v "^$me:" "$ROOT/etc/passwd"; getent passwd "$me" || echo "$me:x:$UID:$(id -g):$me:$HOME:/bin/bash"; } > "$ids/passwd"
+    { grep -v "^$grp:" "$ROOT/etc/group"; getent group "$grp" || echo "$grp:x:$(id -g):"; } > "$ids/group"
+    local a=(
+        --tmpfs /
+        --ro-bind "$ROOT/usr" /usr --ro-bind "$ROOT/etc" /etc --ro-bind "$ROOT/var" /var
+        --ro-bind-try "$ROOT/opt" /opt --ro-bind-try "$ROOT/srv" /srv
+        --symlink usr/bin /bin --symlink usr/bin /sbin --symlink usr/lib /lib --symlink usr/lib /lib64
+        --tmpfs /var/tmp --tmpfs /var/cache
+        --dev-bind /dev /dev --proc /proc --ro-bind /sys /sys
+        --bind /tmp /tmp --bind "$rt" "$rt" --bind "$HOME" "$HOME"
+        --ro-bind "$ids/passwd" /etc/passwd --ro-bind "$ids/group" /etc/group
+        --ro-bind-try /etc/resolv.conf /etc/resolv.conf --ro-bind-try /etc/hosts /etc/hosts
+        --ro-bind-try /etc/localtime /etc/localtime --ro-bind-try /etc/machine-id /etc/machine-id
+        --ro-bind-try /etc/hostname /etc/hostname
+        --bind-try /run/dbus /run/dbus --bind-try /run/media /run/media --bind-try /mnt /mnt --bind-try /media /media
+        --ro-bind-try /run/udev /run/udev
+        # o aspeto da Nexora: temas, ícones, cursores e letras do sistema
+        --ro-bind-try /usr/share/themes /run/host/share/themes
+        --ro-bind-try /usr/share/icons /run/host/share/icons
+        --ro-bind-try /usr/share/fonts /run/host/fonts
+        --setenv PATH /usr/local/bin:/usr/bin
+        --setenv XDG_DATA_DIRS /usr/local/share:/usr/share:/run/host/share
+        --setenv XCURSOR_PATH "$HOME/.local/share/icons:$HOME/.icons:/usr/share/icons:/run/host/share/icons"
+        --setenv NEXORA_AUR 1
+        --unsetenv LD_LIBRARY_PATH --unsetenv LD_PRELOAD --unsetenv GIO_EXTRA_MODULES --unsetenv GTK_PATH
+        --unsetenv GTK_EXE_PREFIX --unsetenv GDK_PIXBUF_MODULE_FILE --unsetenv QT_PLUGIN_PATH
+        --unsetenv PYTHONPATH --unsetenv PERL5LIB --unsetenv GST_PLUGIN_SYSTEM_PATH --unsetenv GTK_MODULES
+        --chdir "$PWD"
+    )
+    exec bwrap "${a[@]}" "$@"
+}
+
+cmd_run() {
+    [ "${1:-}" = "--" ] && shift
+    [ $# -gt 0 ] || die "diz o que correr: nexora-aur run COMANDO"
+    run_box "$@"
+}
+
+cmd_shell() {
+    PS1='\[\e[36m\][aur]\[\e[0m\] \w \$ ' run_box /bin/bash --norc -i
+}
+
+cmd_destroy() {
+    need_root destroy
+    [ -d "$ROOT" ] || [ -d "$DIR" ] || { ok "não há contentor"; return; }
+    if [ -t 0 ]; then
+        read -rp "Apagar o contentor do AUR e TODAS as apps instaladas nele ($(du -sh "$DIR" 2> /dev/null | cut -f1))? [s/N] " r
+        [[ $r =~ ^[sSyY] ]] || die "cancelado"
+    fi
+    # garante que não há montagens penduradas lá dentro antes de apagar
+    if grep -q " $DIR/" /proc/self/mounts; then die "há coisas montadas dentro de $DIR; fecha as apps do AUR"; fi
+    rm -rf --one-file-system "$DIR"
+    ok "contentor apagado — o sistema fica como estava"
+}
+
+case ${1:-} in
+    setup) shift; cmd_setup "$@" ;;
+    install | -S) shift; cmd_install "$@" ;;
+    remove | -R) shift; cmd_remove "$@" ;;
+    update | upgrade | -Syu) shift; cmd_update "$@" ;;
+    search | -Ss) shift; cmd_search "$@" ;;
+    list | -Q) shift; cmd_list "$@" ;;
+    export) shift; cmd_export "$@" ;;
+    run) shift; cmd_run "$@" ;;
+    shell) shift; cmd_shell "$@" ;;
+    destroy) shift; cmd_destroy "$@" ;;
+    "" | -h | --help | help) usage ;;
+    *) usage; exit 1 ;;
+esac
