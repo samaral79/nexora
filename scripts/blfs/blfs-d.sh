@@ -8,7 +8,9 @@ WP=/usr/share/backgrounds/nexora/nexora-wallpaper.png
 export PATH=/opt/rustc/bin:$PATH
 
 mbuild() {
-    mkdir build && cd build
+    # pasta própria (há tarballs que já trazem uma pasta build/) e sem && (o set -e não apanha)
+    mkdir nx-build
+    cd nx-build
     meson setup .. --prefix=/usr --buildtype=release "$@"
     ninja
     ninja install

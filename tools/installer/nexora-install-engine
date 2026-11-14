@@ -1,0 +1,210 @@
+#!/bin/bash
+# nexora-install-engine — motor do instalador da Nexora Linux (corre como root).
+#
+# Uso: nexora-install-engine <ficheiro.conf>      (a senha do utilizador chega pelo stdin, 1.ª linha)
+#
+# O .conf define: DISK FULLNAME USERNAME HOSTNAME TIMEZONE LOCALE KEYMAP XKBLAYOUT DESKTOP CONFIRM=yes
+#   DESKTOP: flow (Nexora Flow, niri/Wayland) ou xfce
+# Saída para o instalador gráfico, uma por linha:
+#   STEP <n> <total> <texto>   |   PROGRESS <0-100>   |   LOG <texto>   |   ERROR <texto>   |   DONE
+#
+# Partições (GPT, arranca em BIOS e em UEFI):
+#   1  1 MiB   BIOS boot (GRUB i386-pc)
+#   2  512 MiB ESP (vfat)
+#   3  resto   raiz ext4
+set -euo pipefail
+export LC_ALL=C PATH=/usr/bin:/usr/sbin
+
+SRC=${NEXORA_SRC:-/run/live/rootfs}      # camada só-de-leitura do live (squashfs)
+T=/mnt/nexora-target
+TOTAL=7
+
+say()   { echo "$*"; }
+step()  { say "STEP $1 $TOTAL $2"; }
+prog()  { say "PROGRESS $1"; }
+log()   { say "LOG $*"; }
+fail()  { say "ERROR $*"; cleanup; exit 1; }
+trap 'fail "falhou na linha $LINENO: $BASH_COMMAND"' ERR
+
+cleanup() {
+    trap - ERR
+    for m in $T/boot/efi $T/sys/firmware/efi/efivars $T/dev/pts $T/dev $T/proc $T/sys $T/run $T; do
+        mountpoint -q "$m" 2>/dev/null && umount -l "$m" || true
+    done
+}
+
+[ "$EUID" -eq 0 ] || { echo "ERROR é preciso root"; exit 1; }
+CONF=${1:?ficheiro de configuração em falta}
+# shellcheck disable=SC1090
+source "$CONF"
+IFS= read -r PASSWORD || true
+
+[ "${CONFIRM:-}" = yes ] || fail "falta CONFIRM=yes"
+[ -b "$DISK" ] || fail "$DISK não é um disco"
+[ -d "$SRC/usr/bin" ] || fail "não encontro o sistema em $SRC (estás no live?)"
+[[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail "nome de utilizador inválido: $USERNAME"
+[ -n "$PASSWORD" ] || fail "senha vazia"
+[ -e "/usr/share/zoneinfo/$TIMEZONE" ] || fail "fuso horário desconhecido: $TIMEZONE"
+
+# nunca instalar por cima do próprio live
+LIVEDEV=$(findmnt -no SOURCE /run/live/medium 2>/dev/null || true)
+if [ -n "$LIVEDEV" ]; then
+    LIVEDISK=/dev/$(lsblk -no PKNAME "$LIVEDEV" 2>/dev/null | head -1)
+    [ "$LIVEDISK" = /dev/ ] && LIVEDISK=$LIVEDEV
+    [ "$DISK" != "$LIVEDISK" ] && [ "$DISK" != "$LIVEDEV" ] || fail "$DISK é o disco de onde o live arrancou"
+fi
+
+part() { case "$DISK" in *nvme*|*mmcblk*|*loop*) echo "${DISK}p$1" ;; *) echo "${DISK}$1" ;; esac; }
+P1=$(part 1); P2=$(part 2); P3=$(part 3)
+
+# ---------------------------------------------------------------- 1. partições
+step 1 "A preparar o disco $DISK"
+prog 2
+cleanup
+for p in $(lsblk -lnpo NAME "$DISK" | tail -n +2); do umount -l "$p" 2>/dev/null || true; swapoff "$p" 2>/dev/null || true; done
+wipefs -af "$DISK" >/dev/null
+sfdisk -q --wipe always "$DISK" << "EOF"
+label: gpt
+size=1MiB, type=21686148-6449-6E6F-744E-656564454649, name="bios_grub"
+size=512MiB, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="EFI"
+type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="Nexora"
+EOF
+partx -u "$DISK" 2>/dev/null || true
+udevadm settle 2>/dev/null || true
+for i in $(seq 50); do [ -b "$P3" ] && break; sleep 0.2; done
+[ -b "$P3" ] || fail "as partições novas não apareceram"
+log "partições criadas: $P1 $P2 $P3"
+prog 5
+
+# ---------------------------------------------------------------- 2. sistemas de ficheiros
+step 2 "A formatar"
+mkfs.vfat -F 32 -n NEXORA_ESP "$P2" >/dev/null
+mkfs.ext4 -F -q -L nexora "$P3"
+mkdir -p $T
+mount "$P3" $T
+mkdir -p $T/boot/efi
+mount "$P2" $T/boot/efi
+prog 8
+
+# ---------------------------------------------------------------- 3. copiar o sistema
+step 3 "A copiar a Nexora para o disco"
+rsync -aHAX --numeric-ids --no-inc-recursive --info=progress2 \
+      --exclude=/dev/ --exclude=/proc/ --exclude=/sys/ --exclude=/run/ --exclude=/tmp/ \
+      --exclude=/boot/efi/ --exclude=/home/nexora/ --exclude=/lost+found/ \
+      "$SRC/" $T/ 2>&1 |
+    tr '\r' '\n' | while read -r line; do
+        if [[ "$line" =~ ([0-9]+)%\  ]]; then
+            echo "PROGRESS $(( 8 + ${BASH_REMATCH[1]} * 72 / 100 ))"
+        fi
+    done
+[ "${PIPESTATUS[0]}" -eq 0 ] || fail "a cópia falhou"
+mkdir -p $T/{dev,proc,sys,run,tmp,home}
+chmod 1777 $T/tmp
+prog 80
+
+# ---------------------------------------------------------------- 4. configurar
+step 4 "A configurar o sistema"
+mount --bind /dev $T/dev
+mount --bind /dev/pts $T/dev/pts
+mount -t proc proc $T/proc
+mount -t sysfs sysfs $T/sys
+mount -t tmpfs tmpfs $T/run
+in_t() { chroot $T /usr/bin/env -i PATH=/usr/bin:/usr/sbin HOME=/root LC_ALL=C "$@"; }
+
+ROOT_UUID=$(blkid -s UUID -o value "$P3")
+ROOT_PARTUUID=$(blkid -s PARTUUID -o value "$P3")
+ESP_UUID=$(blkid -s UUID -o value "$P2")
+cat > $T/etc/fstab << EOF
+# /etc/fstab — gerado pelo instalador da Nexora
+UUID=$ROOT_UUID  /          ext4  defaults,noatime   1 1
+UUID=$ESP_UUID   /boot/efi  vfat  rw,relatime,umask=0077  0 2
+EOF
+
+echo "$HOSTNAME" > $T/etc/hostname
+cat > $T/etc/hosts << EOF
+127.0.0.1 localhost
+127.0.1.1 $HOSTNAME.localdomain $HOSTNAME
+::1       localhost ip6-localhost ip6-loopback
+EOF
+ln -sfn "/usr/share/zoneinfo/$TIMEZONE" $T/etc/localtime
+echo "LANG=$LOCALE" > $T/etc/locale.conf
+printf 'KEYMAP=%s\nFONT=Lat2-Terminus16\n' "$KEYMAP" > $T/etc/vconsole.conf
+mkdir -p $T/etc/X11/xorg.conf.d
+cat > $T/etc/X11/xorg.conf.d/00-keyboard.conf << EOF
+Section "InputClass"
+        Identifier "system-keyboard"
+        MatchIsKeyboard "on"
+        Option "XkbLayout" "$XKBLAYOUT"
+EndSection
+EOF
+
+# ambiente de trabalho por omissão no ecrã de login
+mkdir -p $T/etc/lightdm/lightdm.conf.d
+case "${DESKTOP:-flow}" in
+    xfce) SESSION=xfce ;;
+    *)    SESSION=niri ;;
+esac
+printf '[Seat:*]\nuser-session=%s\n' "$SESSION" > $T/etc/lightdm/lightdm.conf.d/50-nexora-session.conf
+# o teclado do Nexora Flow (o niri não lê o xorg.conf.d)
+[ -f $T/etc/niri/config.kdl ] && sed -i "s/^\( *layout\) \"[a-z]*\"/\1 \"$XKBLAYOUT\"/" $T/etc/niri/config.kdl
+log "ambiente por omissão: $SESSION"
+
+# tirar tudo o que é só do live
+if [ -f $T/etc/nexora-live ]; then
+    in_t userdel -r nexora 2>/dev/null || in_t userdel nexora 2>/dev/null || true
+    while read -r f; do [ -n "$f" ] && rm -rf "$T/${f#/}"; done < $T/etc/nexora-live
+    rm -f $T/etc/nexora-live
+fi
+: > $T/etc/machine-id
+rm -f $T/etc/ssh/ssh_host_*
+
+# utilizador
+in_t groupadd -f autologin
+if in_t getent passwd "$USERNAME" >/dev/null; then in_t userdel -r "$USERNAME" || true; fi
+in_t useradd -m -c "$FULLNAME" -G wheel,video,audio,input,users -s /bin/bash "$USERNAME"
+printf '%s:%s\n' "$USERNAME" "$PASSWORD" | in_t chpasswd
+in_t passwd -l root >/dev/null      # root bloqueado: administra-se com sudo (grupo wheel)
+log "utilizador $USERNAME criado"
+prog 85
+
+# ---------------------------------------------------------------- 5. arranque
+step 5 "A instalar o GRUB"
+KERNEL=$(cd $T/boot && ls vmlinuz-* | sort -V | tail -1)
+if [ -d /sys/firmware/efi ]; then
+    mount -t efivarfs efivarfs $T/sys/firmware/efi/efivars 2>/dev/null || true
+    in_t grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=Nexora --recheck \
+        >/dev/null 2>&1 && log "GRUB UEFI instalado (entrada Nexora)" || log "aviso: entrada UEFI não criada"
+fi
+# cópia "removível" (firmwares que ignoram a NVRAM) + BIOS no mesmo disco
+in_t grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable --no-nvram >/dev/null 2>&1 \
+    && log "GRUB UEFI (removível) instalado" || log "aviso: GRUB UEFI removível falhou"
+in_t grub-install --target=i386-pc "$DISK" >/dev/null 2>&1 \
+    && log "GRUB BIOS instalado" || log "aviso: GRUB BIOS falhou"
+cat > $T/boot/grub/grub.cfg << EOF
+# gerado pelo instalador da Nexora
+set default=0
+set timeout=3
+insmod part_gpt
+insmod ext2
+insmod all_video
+search --no-floppy --fs-uuid --set=root $ROOT_UUID
+set gfxpayload=keep
+set menu_color_normal=light-gray/black
+set menu_color_highlight=black/cyan
+
+menuentry "Nexora Linux" {
+        linux   /boot/$KERNEL root=PARTUUID=$ROOT_PARTUUID ro quiet loglevel=3
+}
+menuentry "Nexora Linux (modo de recuperação)" {
+        linux   /boot/$KERNEL root=PARTUUID=$ROOT_PARTUUID ro systemd.unit=rescue.target
+}
+EOF
+prog 95
+
+# ---------------------------------------------------------------- 6. fim
+step 6 "A terminar"
+sync
+cleanup
+prog 100
+step 7 "Instalação concluída"
+say DONE

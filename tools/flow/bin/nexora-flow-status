@@ -1,0 +1,19 @@
+#!/bin/sh
+# Estado da rede e da bateria para a barra do Nexora Flow (eww defpoll). Escreve uma linha JSON.
+I=/usr/share/icons/Papirus-Dark/24x24/panel
+net_text="Sem rede"; net_icon="$I/network-offline.svg"
+if command -v nmcli >/dev/null 2>&1; then
+    line=$(nmcli -t -f TYPE,STATE,CONNECTION device 2>/dev/null | grep ':connected:' | head -1)
+    type=${line%%:*}; name=${line##*:}
+    case $type in
+        wifi)     net_icon="$I/network-wireless-signal-excellent.svg"; net_text=$name ;;
+        ethernet) net_icon="$I/network-wired.svg"; net_text="Cabo" ;;
+        "")       ;;
+        *)        net_icon="$I/network-wired.svg"; net_text=$name ;;
+    esac
+fi
+bat=""
+for b in /sys/class/power_supply/BAT*; do
+    [ -r "$b/capacity" ] && bat="$(cat "$b/capacity")%" && break
+done
+printf '{"net":"%s","net_icon":"%s","bat":"%s"}\n' "$net_text" "$net_icon" "$bat"

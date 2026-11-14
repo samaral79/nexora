@@ -1,0 +1,93 @@
+;; Nexora Flow — barra e doca (eww). Cópia pessoal: cp -r /usr/share/nexora-flow/eww ~/.config/eww
+
+(defvar EWW "eww -c /usr/share/nexora-flow/eww")
+(defvar PANEL "/usr/share/icons/Papirus-Dark/24x24/panel")
+(defvar APPS "/usr/share/icons/Papirus-Dark/48x48/apps")
+
+(deflisten niri :initial "{\"ws\":[],\"title\":\"\",\"app\":\"\"}" "nexora-flow-niri")
+(defpoll status :interval "8s" :initial "{\"net\":\"\",\"net_icon\":\"\",\"bat\":\"\"}" "nexora-flow-status")
+(defpoll clock :interval "10s" "date '+%a %d %b   %H:%M'")
+(defvar power false)
+
+;; ---------------------------------------------------------------- barra
+(defwidget logo []
+  (button :class "logo" :tooltip "Apps (Super+Espaço)" :onclick "fuzzel &"
+    (box :space-evenly false :spacing 8
+      (image :path "/usr/share/icons/hicolor/scalable/apps/nexora.svg" :image-width 20 :image-height 20)
+      (label :class "brand" :text "Nexora" :truncate false))))
+
+(defwidget workspaces []
+  (box :class "ws" :space-evenly false :spacing 6 :valign "center"
+    (for w in {niri.ws}
+      (button :class {w.active ? "dot active" : (w.windows > 0 ? "dot busy" : "dot")}
+              :tooltip "Área ${w.idx}"
+              :onclick "niri msg action focus-workspace ${w.idx}" ""))))
+
+(defwidget left []
+  (box :space-evenly false :spacing 14 :halign "start"
+    (logo)
+    (workspaces)
+    (label :class "title" :limit-width 60 :text {niri.title})))
+
+(defwidget center []
+  (label :class "clock" :text clock))
+
+(defwidget right []
+  (box :space-evenly false :spacing 14 :halign "end"
+    (button :class "chip" :tooltip "Rede (abrir ligações)" :onclick "nm-connection-editor &"
+      (box :space-evenly false :spacing 6
+        (image :path {status.net_icon} :image-width 16 :image-height 16)
+        (label :text {status.net})))
+    (box :class "chip" :visible {status.bat != ""} :space-evenly false :spacing 6
+      (image :path "${PANEL}/battery-good.svg" :image-width 16 :image-height 16)
+      (label :text {status.bat}))
+    (button :class "power" :tooltip "Sessão" :onclick "${EWW} open --toggle powermenu"
+      (image :path "${PANEL}/system-shutdown-panel.svg" :image-width 16 :image-height 16))))
+
+(defwindow bar
+  :monitor 0
+  :geometry (geometry :x "0" :y "0" :width "100%" :height "36px" :anchor "top center")
+  :stacking "fg"
+  :exclusive true
+  :focusable false
+  :namespace "nexora-bar"
+  (centerbox :class "bar" (left) (center) (right)))
+
+;; ---------------------------------------------------------------- doca
+(defwidget app [icon cmd name]
+  (button :class "app" :tooltip name :onclick "${cmd} &"
+    (image :path icon :image-width 40 :image-height 40)))
+
+(defwindow dock
+  :monitor 0
+  :geometry (geometry :x "0" :y "10px" :width "0" :height "60px" :anchor "bottom center")
+  :stacking "fg"
+  :exclusive true
+  :focusable false
+  :namespace "nexora-dock"
+  (box :class "dock" :space-evenly false :spacing 4
+    (app :icon "${APPS}/utilities-terminal.svg" :cmd "xfce4-terminal" :name "Terminal")
+    (app :icon "${APPS}/system-file-manager.svg" :cmd "thunar" :name "Ficheiros")
+    (app :icon "${APPS}/accessories-text-editor.svg" :cmd "mousepad" :name "Editor de texto")
+    (app :icon "${APPS}/org.xfce.ristretto.svg" :cmd "ristretto" :name "Imagens")
+    (box :class "sep")
+    (app :icon "${APPS}/preferences-system.svg" :cmd "fuzzel" :name "Todas as apps")))
+
+;; ---------------------------------------------------------------- menu de sessão
+(defwidget pbutton [icon text cmd]
+  (button :class "pbutton" :onclick "${EWW} close powermenu; ${cmd}"
+    (box :space-evenly false :spacing 12
+      (image :path icon :image-width 22 :image-height 22)
+      (label :text text))))
+
+(defwindow powermenu
+  :monitor 0
+  :geometry (geometry :x "10px" :y "8px" :anchor "top right")
+  :stacking "overlay"
+  :focusable false
+  :namespace "nexora-power"
+  (box :class "powermenu" :orientation "v" :space-evenly false :spacing 2
+    (pbutton :icon "/usr/share/icons/Papirus/24x24/apps/system-lock-screen.svg" :text "Bloquear" :cmd "swaylock -f &")
+    (pbutton :icon "/usr/share/icons/Papirus/24x24/apps/system-log-out.svg" :text "Terminar sessão" :cmd "niri msg action quit --skip-confirmation")
+    (pbutton :icon "/usr/share/icons/Papirus/24x24/apps/system-reboot.svg" :text "Reiniciar" :cmd "systemctl reboot")
+    (pbutton :icon "/usr/share/icons/Papirus/24x24/apps/system-shutdown.svg" :text "Desligar" :cmd "systemctl poweroff")))

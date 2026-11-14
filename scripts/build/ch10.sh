@@ -56,9 +56,32 @@ p_kernel() {
     # BLFS: llvmpipe precisa de VGEM; polkit/upower de user namespaces; libinput de evdev
     $c -e DRM_VGEM -e NAMESPACES -e USER_NS -e INPUT_EVDEV -e INPUT_UINPUT \
        -e SND -e SND_HDA_INTEL -e SND_HDA_CODEC_GENERIC -e HID_GENERIC -e USB_HID
+    # live/ISO e instalação em hardware real: tudo built-in (o initramfs não carrega módulos)
+    $c -e BLK_DEV_INITRD -e RD_ZSTD -e SQUASHFS -e SQUASHFS_XZ -e SQUASHFS_ZSTD -e SQUASHFS_XATTR \
+       -e OVERLAY_FS -e ISO9660_FS -e JOLIET -e ZISOFS -e BLK_DEV_LOOP -e BLK_DEV_SR \
+       -e ATA -e SATA_AHCI -e ATA_PIIX -e BLK_DEV_SD -e SCSI \
+       -e USB_STORAGE -e USB_UAS -e USB_XHCI_HCD -e USB_EHCI_HCD -e USB_OHCI_HCD -e USB_UHCI_HCD \
+       -e MMC -e MMC_SDHCI -e MMC_SDHCI_PCI -e MMC_BLOCK \
+       -e FB_EFI -e SYSFB_SIMPLEFB -e DRM_SIMPLEDRM
+    # hardware real (módulos; o firmware vem do linux-firmware, comprimido em zstd)
+    $c -e FW_LOADER -e FW_LOADER_COMPRESS -e FW_LOADER_COMPRESS_ZSTD -e FW_LOADER_COMPRESS_XZ \
+       -m ACPI_VIDEO -e BACKLIGHT_CLASS_DEVICE \
+       -m DRM_AMDGPU -e DRM_AMDGPU_SI -e DRM_AMDGPU_CIK -e DRM_AMD_DC -m DRM_RADEON \
+       -m DRM_I915 -m DRM_XE -m DRM_NOUVEAU \
+       -m CFG80211 -m MAC80211 -e WLAN -e WIRELESS \
+       -m IWLWIFI -m IWLDVM -m IWLMVM -m IWLMLD \
+       -m ATH9K -m ATH10K -m ATH10K_PCI -m ATH11K -m ATH11K_PCI -m ATH12K \
+       -m RTW88 -m RTW88_8822BE -m RTW88_8822CE -m RTW88_8821CE -m RTW88_8723DE \
+       -m RTW89 -m RTW89_8852AE -m RTW89_8852BE -m RTW89_8852CE -m RTW89_8922AE -m RTL8XXXU \
+       -m MT7921E -m MT7925E -m BRCMFMAC -e BRCMFMAC_PCIE -e BRCMFMAC_USB -m BRCMSMAC \
+       -m R8169 -m E1000E -m IGB -m IGC -m ALX -m ATL1C -m TIGON3 \
+       -m USB_USBNET -m USB_RTL8152 -m USB_NET_CDCETHER -m USB_NET_RNDIS_HOST \
+       -m BT -m BT_HCIBTUSB -e BT_HCIBTUSB_RTL -e BT_HCIBTUSB_MTK \
+       -m SND_HDA_CODEC_REALTEK -m SND_HDA_CODEC_HDMI -m SND_HDA_CODEC_CONEXANT \
+       -m I2C_HID_ACPI -m HID_MULTITOUCH -m INPUT_TOUCHSCREEN
     make olddefconfig
     # confirmar que o essencial ficou mesmo ligado
-    for o in DRM_VGEM USER_NS INPUT_EVDEV DEVTMPFS DEVTMPFS_MOUNT EFI_STUB VIRTIO_BLK VIRTIO_PCI EXT4_FS VFAT_FS EFI_PARTITION CGROUPS; do
+    for o in FW_LOADER_COMPRESS_ZSTD SQUASHFS OVERLAY_FS ISO9660_FS BLK_DEV_LOOP BLK_DEV_SR USB_STORAGE SATA_AHCI BLK_DEV_INITRD DRM_VGEM USER_NS INPUT_EVDEV DEVTMPFS DEVTMPFS_MOUNT EFI_STUB VIRTIO_BLK VIRTIO_PCI EXT4_FS VFAT_FS EFI_PARTITION CGROUPS; do
         grep -qx "CONFIG_$o=y" .config || { echo "CONFIG_$o não ficou =y"; exit 1; }
     done
     make

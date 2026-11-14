@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Instalar a Nexora Linux
+GenericName=Instalador
+Comment=Instala a Nexora Linux no disco
+Exec=nexora-installer
+Icon=nexora
+Terminal=false
+Categories=System;
+StartupNotify=true

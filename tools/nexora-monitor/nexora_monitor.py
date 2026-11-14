@@ -49,9 +49,13 @@ PHASES = [
     ("blfs-b", "BLFS B · Xorg, Mesa e GTK", "blfs/blfs-b.sh"),
     ("blfs-c", "BLFS C · Xfce e LightDM", "blfs/blfs-c.sh"),
     ("blfs-d", "Nexora · Toques finais", "blfs/blfs-d.sh"),
+    ("blfs-e", "Nexora · Xfce de origem", "blfs/blfs-e.sh"),
+    ("blfs-f", "Nexora · Live e instalador", "blfs/blfs-f.sh"),
+    ("blfs-g", "Nexora · Hardware e visual", "blfs/blfs-g.sh"),
+    ("blfs-h", "Nexora Flow · Wayland", "blfs/blfs-h.sh"),
 ]
 # fases que correm dentro do chroot (as que o botão Retomar sabe relançar)
-CHROOT_PHASES = ["ch7", "ch8", "ch9", "ch10", "blfs-a", "blfs-b", "blfs-c", "blfs-d"]
+CHROOT_PHASES = ["ch7", "ch8", "ch9", "ch10", "blfs-a", "blfs-b", "blfs-c", "blfs-d", "blfs-e", "blfs-f", "blfs-g", "blfs-h"]
 
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\r")
 JLINE = re.compile(r"^(\d+\.\d+) \S+ \S+: (🔨|✔|✘|⏭)\s+(\S+)(?: \.\.\.)?(?: \((\d+)m(\d+)s\))?")

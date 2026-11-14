@@ -1,0 +1,104 @@
+// Nexora Flow — estilo da barra, doca e menu de sessão
+$bg: rgba(6, 14, 24, 0.82);
+$card: rgba(16, 28, 42, 0.86);
+$line: rgba(255, 255, 255, 0.08);
+$fg: #d6e4ea;
+$dim: #8aa0b0;
+$cyan: #22b8cf;
+$violet: #7b5cff;
+
+* {
+  all: unset;
+  font-family: "Inter", "DejaVu Sans", sans-serif;
+  font-size: 10pt;
+  color: $fg;
+}
+
+tooltip {
+  background-color: $card;
+  border: 1px solid $line;
+  border-radius: 10px;
+  padding: 6px 10px;
+}
+
+// ---------------------------------------------------------------- barra
+.bar {
+  background-color: $bg;
+  border-bottom: 1px solid $line;
+  padding: 0 12px;
+}
+
+.logo {
+  padding: 2px 10px;
+  border-radius: 10px;
+  .brand { font-weight: 700; }
+  &:hover { background-color: rgba(34, 184, 207, 0.15); }
+}
+
+.ws .dot {
+  min-width: 9px;
+  min-height: 9px;
+  border-radius: 99px;
+  background-color: rgba(255, 255, 255, 0.18);
+  transition: all 200ms ease;
+  &.busy { background-color: rgba(34, 184, 207, 0.45); }
+  &.active {
+    min-width: 26px;
+    background-image: linear-gradient(90deg, $cyan, $violet);
+  }
+  &:hover { background-color: rgba(255, 255, 255, 0.35); }
+}
+
+.title { color: $dim; }
+
+.clock {
+  font-weight: 600;
+}
+
+.chip {
+  padding: 3px 10px;
+  border-radius: 99px;
+  background-color: rgba(255, 255, 255, 0.05);
+  &:hover { background-color: rgba(34, 184, 207, 0.18); }
+}
+
+.power {
+  padding: 4px 8px;
+  border-radius: 99px;
+  &:hover { background-color: rgba(229, 83, 75, 0.25); }
+}
+
+// ---------------------------------------------------------------- doca
+.dock {
+  background-color: $card;
+  border: 1px solid $line;
+  border-radius: 20px;
+  padding: 6px 10px;
+}
+
+.app {
+  padding: 4px;
+  border-radius: 14px;
+  transition: all 150ms ease;
+  &:hover { background-color: rgba(34, 184, 207, 0.18); }
+}
+
+.sep {
+  min-width: 1px;
+  margin: 8px 6px;
+  background-color: $line;
+}
+
+// ---------------------------------------------------------------- menu de sessão
+.powermenu {
+  background-color: $card;
+  border: 1px solid $line;
+  border-radius: 16px;
+  padding: 8px;
+}
+
+.pbutton {
+  padding: 8px 14px;
+  border-radius: 10px;
+  &:hover { background-color: rgba(34, 184, 207, 0.18); }
+}

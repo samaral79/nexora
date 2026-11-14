@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""Estado do niri para a barra do Nexora Flow (eww deflisten).
+
+Lê `niri msg -j event-stream` e escreve uma linha JSON por mudança:
+  {"ws": [{"idx": 1, "active": true, "windows": 2}, ...], "title": "...", "app": "..."}
+"""
+import json
+import subprocess
+import sys
+import time
+
+workspaces = {}   # id -> dict do niri
+windows = {}      # id -> dict do niri
+focused = None
+last = None
+
+
+def emit():
+    global last
+    outs = {w.get("output") for w in workspaces.values() if w.get("is_focused")} or {None}
+    out = next(iter(outs))
+    ws = sorted((w for w in workspaces.values() if out is None or w.get("output") == out),
+                key=lambda w: w["idx"])
+    count = {}
+    for win in windows.values():
+        count[win.get("workspace_id")] = count.get(win.get("workspace_id"), 0) + 1
+    f = windows.get(focused) or {}
+    data = {
+        "ws": [{"idx": w["idx"], "active": bool(w.get("is_active")), "windows": count.get(w["id"], 0)} for w in ws],
+        "title": (f.get("title") or "")[:80],
+        "app": f.get("app_id") or "",
+    }
+    line = json.dumps(data, ensure_ascii=False)
+    if line != last:
+        print(line, flush=True)
+        last = line
+
+
+def handle(ev):
+    global focused
+    if "WorkspacesChanged" in ev:
+        workspaces.clear()
+        for w in ev["WorkspacesChanged"]["workspaces"]:
+            workspaces[w["id"]] = w
+    elif "WorkspaceActivated" in ev:
+        e = ev["WorkspaceActivated"]
+        target = workspaces.get(e["id"])
+        if target:
+            for w in workspaces.values():
+                if w.get("output") == target.get("output"):
+                    w["is_active"] = False
+                if e.get("focused"):
+                    w["is_focused"] = False
+            target["is_active"] = True
+            if e.get("focused"):
+                target["is_focused"] = True
+    elif "WindowsChanged" in ev:
+        windows.clear()
+        for w in ev["WindowsChanged"]["windows"]:
+            windows[w["id"]] = w
+            if w.get("is_focused"):
+                focused = w["id"]
+    elif "WindowOpenedOrChanged" in ev:
+        w = ev["WindowOpenedOrChanged"]["window"]
+        windows[w["id"]] = w
+        if w.get("is_focused"):
+            focused = w["id"]
+    elif "WindowClosed" in ev:
+        windows.pop(ev["WindowClosed"]["id"], None)
+    elif "WindowFocusChanged" in ev:
+        focused = ev["WindowFocusChanged"]["id"]
+    else:
+        return
+    emit()
+
+
+def main():
+    print(json.dumps({"ws": [], "title": "", "app": ""}), flush=True)
+    while True:
+        try:
+            p = subprocess.Popen(["niri", "msg", "-j", "event-stream"], stdout=subprocess.PIPE, text=True)
+            for line in p.stdout:
+                try:
+                    handle(json.loads(line))
+                except (ValueError, KeyError):
+                    continue
+        except FileNotFoundError:
+            pass
+        time.sleep(2)   # o niri reiniciou ou ainda não arrancou
+
+
+if __name__ == "__main__":
+    sys.exit(main())

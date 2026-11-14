@@ -10,7 +10,9 @@ export PATH=/opt/rustc/bin:$PATH
 
 # meson padrão: mbuild [opções...]
 mbuild() {
-    mkdir build && cd build
+    # pasta própria (há tarballs que já trazem uma pasta build/) e sem && (o set -e não apanha)
+    mkdir nx-build
+    cd nx-build
     meson setup .. --prefix=/usr --buildtype=release "$@"
     ninja
     ninja install

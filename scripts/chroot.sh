@@ -36,6 +36,8 @@ cat /etc/resolv.conf > $LFS/run/systemd/resolve/stub-resolv.conf
 DEST=$LFS/sources/nexora-build
 mkdir -p $DEST
 cp "$(dirname "$0")"/build/*.sh "$(dirname "$0")"/blfs/*.sh $DEST/
+mkdir -p $DEST/installer && cp -a "$(dirname "$0")"/../tools/installer/. $DEST/installer/
+mkdir -p $DEST/flow && cp -a "$(dirname "$0")"/../tools/flow/. $DEST/flow/
 
 ENV=(HOME=/root TERM="$TERM" PS1='(nexora chroot) \u:\w\$ '
      PATH=/usr/bin:/usr/sbin MAKEFLAGS="-j$(nproc)" TESTSUITEFLAGS="-j$(nproc)" LFS=)
