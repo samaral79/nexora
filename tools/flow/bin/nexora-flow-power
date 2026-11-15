@@ -1,0 +1,12 @@
+#!/bin/sh
+# Painel rápido do Nexora Flow: passa ao modo de energia seguinte (equilibrado → poupança → desempenho)
+cur=$(powerprofilesctl get 2>/dev/null) || exit 0
+have=$(powerprofilesctl list 2>/dev/null | sed -n 's/^[ *]*\([a-z-]*\):$/\1/p')
+case $cur in
+    balanced) order="power-saver performance balanced" ;;
+    power-saver) order="performance balanced" ;;
+    *) order="balanced" ;;
+esac
+for p in $order; do
+    echo "$have" | grep -qx "$p" && exec powerprofilesctl set "$p"
+done

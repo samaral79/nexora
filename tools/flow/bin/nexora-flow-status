@@ -41,12 +41,30 @@ for b in /sys/class/power_supply/BAT*; do
     break
 done
 
+# ---- Bluetooth (BlueZ por D-Bus: rápido, sem abrir o bluetoothctl)
+bt_has=false; bt_on=false
+if out=$(busctl --system get-property org.bluez /org/bluez/hci0 org.bluez.Adapter1 Powered 2>/dev/null); then
+    bt_has=true; [ "$out" = "b true" ] && bt_on=true
+fi
+
+# ---- modo de energia (power-profiles-daemon)
+profile=$(busctl --system get-property org.freedesktop.UPower.PowerProfiles /org/freedesktop/UPower/PowerProfiles \
+          org.freedesktop.UPower.PowerProfiles ActiveProfile 2>/dev/null | cut -d'"' -f2)
+
+# ---- brilho do ecrã (portáteis)
+bright=""
+for d in /sys/class/backlight/*; do
+    [ -r "$d/brightness" ] || continue
+    bright=$(( $(cat "$d/brightness") * 100 / $(cat "$d/max_brightness") ))
+    break
+done
+
 # ---- não incomodar (mako)
 dnd=false
 makoctl mode 2>/dev/null | grep -q do-not-disturb && dnd=true
 
 user=$(getent passwd "$(id -un)" | cut -d: -f5 | cut -d, -f1); [ -n "$user" ] || user=$(id -un)
 
-printf '{"net":"%s","net_icon":"%s","wifi_on":%s,"vol":%s,"muted":%s,"vol_icon":"%s","bat":"%s","bat_icon":"%s","dnd":%s,"user":"%s"}\n' \
+printf '{"net":"%s","net_icon":"%s","wifi_on":%s,"vol":%s,"muted":%s,"vol_icon":"%s","bat":"%s","bat_icon":"%s","dnd":%s,"user":"%s","bt_has":%s,"bt_on":%s,"profile":"%s","bright":"%s"}\n' \
     "$(printf %s "$net" | sed 's/"/\\"/g')" "$net_icon" "$wifi_on" "$vol" "$muted" "$vol_icon" "$bat" "$bat_icon" "$dnd" \
-    "$(printf %s "$user" | sed 's/"/\\"/g')"
+    "$(printf %s "$user" | sed 's/"/\\"/g')" "$bt_has" "$bt_on" "$profile" "$bright"

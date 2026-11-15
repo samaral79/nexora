@@ -49,7 +49,7 @@ for d in dev/pts dev proc sys run; do umount $M/$d; done
 echo "== 3/6 squashfs (zstd)"
 mksquashfs $M $R/nexora/rootfs.sfs -noappend -comp zstd -Xcompression-level 15 -b 1M -quiet -progress \
     -wildcards -e 'sources' 'tools' 'lost+found' 'boot/efi/*' 'tmp/*' 'var/tmp/*' 'var/log/journal/*' \
-                  'usr/share/doc/*' 'usr/share/gtk-doc/*' 'usr/lib/libLLVM*.a'
+                  'usr/share/doc/*' 'usr/share/gtk-doc/*' 'usr/lib/libLLVM*.a' 'root/.cargo' 'root/.cache'
 du -h $R/nexora/rootfs.sfs
 
 echo "== 4/6 kernel e initramfs"

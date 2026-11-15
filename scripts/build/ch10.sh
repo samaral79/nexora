@@ -82,7 +82,11 @@ p_kernel() {
     # Flatpak/portais (FUSE), GTK4 (udmabuf), som USB e codecs HDA comuns
     $c -e FUSE_FS -m CUSE -e UDMABUF -m SND_USB_AUDIO -m SND_HDA_CODEC_ANALOG \
        -m SND_HDA_CODEC_CIRRUS -m SND_HDA_CODEC_VIA -m SND_HDA_CODEC_CA0132
+    # portáteis, discos, Bluetooth, jogos, som SOF... (o mesmo que a fase Q)
+    source "$(dirname "${BASH_SOURCE[0]}")/kernel-extra.sh"
+    kcfg_extra
     make olddefconfig
+    kcfg_check
     # confirmar que o essencial ficou mesmo ligado
     for o in FW_LOADER_COMPRESS_ZSTD SQUASHFS OVERLAY_FS ISO9660_FS BLK_DEV_LOOP BLK_DEV_SR USB_STORAGE SATA_AHCI BLK_DEV_INITRD DRM_VGEM USER_NS INPUT_EVDEV DEVTMPFS DEVTMPFS_MOUNT EFI_STUB VIRTIO_BLK VIRTIO_PCI EXT4_FS VFAT_FS EFI_PARTITION CGROUPS FUSE_FS UDMABUF; do
         grep -qx "CONFIG_$o=y" .config || { echo "CONFIG_$o não ficou =y"; exit 1; }

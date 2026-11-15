@@ -5,6 +5,9 @@ S=/usr/share/nexora-flow
 EWW=$S/eww;  [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/eww/eww.yuck" ] && EWW="${XDG_CONFIG_HOME:-$HOME/.config}/eww"
 MAKO=$S/mako.conf; [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/mako/config" ] && MAKO="${XDG_CONFIG_HOME:-$HOME/.config}/mako/config"
 
+# pastas pessoais (Documentos, Transferências, ...) no idioma da sessão; não mexe nas que já existem
+xdg-user-dirs-update >/dev/null 2>&1
+
 # fundo escolhido na app Definições (~/.config/nexora/wallpaper)
 WALL=/usr/share/backgrounds/nexora/nexora-aurora.png
 W=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/nexora/wallpaper" 2>/dev/null); [ -f "$W" ] && WALL=$W

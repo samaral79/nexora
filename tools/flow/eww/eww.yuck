@@ -118,6 +118,11 @@
       (scale :hexpand true :min 0 :max 101 :value {st.vol}
              :onchange "wpctl set-volume @DEFAULT_AUDIO_SINK@ {}%")
       (label :class "small" :text "${st.vol}%"))
+    (box :class "slider" :space-evenly false :spacing 10 :visible {st.bright != ""}
+      (image :path "${PANEL}/gpm-brightness-lcd.svg" :image-width 18 :image-height 18)
+      (scale :hexpand true :min 5 :max 101 :value {st.bright == "" ? 50 : st.bright}
+             :onchange "brightnessctl -q -c backlight set {}%")
+      (label :class "small" :text "${st.bright}%"))
     (box :class "tiles" :orientation "v" :space-evenly true :spacing 8
       (box :space-evenly true :spacing 8
         (tile :icon {st.net_icon} :label "Network" :sub {st.net} :active {st.net != "Offline"}
@@ -128,7 +133,16 @@
         (tile :icon "${PANEL}/notification-disabled.svg" :label "Do not disturb" :sub {st.dnd ? "On" : "Off"}
               :active {st.dnd} :cmd "makoctl mode -t do-not-disturb")
         (tile :icon "${PANEL}/audio-volume-high.svg" :label "Sound" :sub "Devices"
-              :active false :cmd "${EWW} close quicksettings; pavucontrol &")))))
+              :active false :cmd "${EWW} close quicksettings; pavucontrol &"))
+      (box :space-evenly true :spacing 8
+        (tile :icon "${PANEL}/${st.bt_on ? 'bluetooth-active' : 'bluetooth-disabled'}.svg" :label "Bluetooth"
+              :sub {st.bt_has ? (st.bt_on ? "On" : "Off") : "No adapter"} :active {st.bt_on}
+              :cmd "bluetoothctl power ${st.bt_on ? 'off' : 'on'}")
+        (tile :icon "/usr/share/nexora-flow/icons/power-${st.profile == '' ? 'balanced' : st.profile}.svg"
+              :label "Power mode"
+              :sub {st.profile == "power-saver" ? "Power saver" : st.profile == "performance" ? "Performance" : st.profile == "" ? "Unavailable" : "Balanced"}
+              :active {st.profile == "power-saver" || st.profile == "performance"}
+              :cmd "nexora-flow-power")))))
 
 ;; ================================================================= energia
 (defwidget pitem [icon text cmd]
