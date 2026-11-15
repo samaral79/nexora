@@ -81,3 +81,32 @@ kcfg_check() {
     done
     return $bad
 }
+
+# Perfil de jogo (fase R, kernel do CachyOS): o mesmo que o linux-cachyos por omissão, mas com gcc
+# (sem LTO/clang) e para qualquer CPU x86-64-v2 (não "native": a ISO corre em PCs diferentes).
+#   BORE, 1000 Hz, tickless total, preempção total, -O3, THP sempre, NTSYNC para o Wine/Proton.
+kcfg_gaming() {
+    local c=scripts/config
+    $c -e CACHY -e SCHED_BORE
+    $c -e GENERIC_CPU -d MZEN4 -d X86_NATIVE_CPU --set-val X86_64_VERSION 2
+    $c -d HZ_300 -d HZ_250 -e HZ_1000 --set-val HZ 1000
+    $c -d HZ_PERIODIC -d NO_HZ_IDLE -d CONTEXT_TRACKING_FORCE -e NO_HZ_FULL_NODEF -e NO_HZ_FULL \
+       -e NO_HZ -e NO_HZ_COMMON -e CONTEXT_TRACKING
+    $c -e PREEMPT_DYNAMIC -e PREEMPT -d PREEMPT_LAZY -d PREEMPT_VOLUNTARY -d PREEMPT_NONE
+    $c -d CC_OPTIMIZE_FOR_PERFORMANCE -e CC_OPTIMIZE_FOR_PERFORMANCE_O3
+    $c -e TRANSPARENT_HUGEPAGE -d TRANSPARENT_HUGEPAGE_MADVISE -e TRANSPARENT_HUGEPAGE_ALWAYS
+    $c -m NTSYNC -e FUTEX -e FUTEX_PI
+    # rede (o CachyOS tem o BBRv3 como módulo; a Nexora deixa o CUBIC por omissão)
+    $c -m TCP_CONG_BBR -m NET_SCH_FQ
+    # escalonadores de disco que as regras udev do CachyOS escolhem (kyber, mq-deadline, bfq)
+    $c -e MQ_IOSCHED_DEADLINE -e MQ_IOSCHED_KYBER -e IOSCHED_BFQ
+}
+
+kcfg_gaming_check() {
+    local o bad=0
+    for o in CACHY SCHED_BORE HZ_1000 PREEMPT NO_HZ_FULL CC_OPTIMIZE_FOR_PERFORMANCE_O3 \
+             TRANSPARENT_HUGEPAGE_ALWAYS NTSYNC MQ_IOSCHED_KYBER IOSCHED_BFQ; do
+        grep -qE "^CONFIG_$o=(y|m)$" .config || { echo "CONFIG_$o não ficou ligado"; bad=1; }
+    done
+    return $bad
+}

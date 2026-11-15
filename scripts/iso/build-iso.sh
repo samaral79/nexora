@@ -47,9 +47,16 @@ rm -f $M/tmp/live-setup.sh
 for d in dev/pts dev proc sys run; do umount $M/$d; done
 
 echo "== 3/6 squashfs (zstd)"
+# só o kernel mais recente vai para a ISO (os antigos ficam no lfs.img como alternativa)
+OLDK=()
+for k in $(cd $LFS/boot && ls vmlinuz-*-nexora | sort -V | head -n -1); do
+    v=${k#vmlinuz-}
+    OLDK+=("boot/$k" "usr/lib/modules/$v" "boot/System.map-${v%-nexora}" "boot/config-${v%-nexora}")
+done
 mksquashfs $M $R/nexora/rootfs.sfs -noappend -comp zstd -Xcompression-level 15 -b 1M -quiet -progress \
     -wildcards -e 'sources' 'tools' 'lost+found' 'boot/efi/*' 'tmp/*' 'var/tmp/*' 'var/log/journal/*' \
-                  'usr/share/doc/*' 'usr/share/gtk-doc/*' 'usr/lib/libLLVM*.a' 'root/.cargo' 'root/.cache'
+                  'usr/share/doc/*' 'usr/share/gtk-doc/*' 'usr/lib/libLLVM*.a' 'usr/lib/libclang*.a' \
+                  'root/.cargo' 'root/.cache' "${OLDK[@]}"
 du -h $R/nexora/rootfs.sfs
 
 echo "== 4/6 kernel e initramfs"

@@ -5,6 +5,10 @@ S=/usr/share/nexora-flow
 EWW=$S/eww;  [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/eww/eww.yuck" ] && EWW="${XDG_CONFIG_HOME:-$HOME/.config}/eww"
 MAKO=$S/mako.conf; [ -f "${XDG_CONFIG_HOME:-$HOME/.config}/mako/config" ] && MAKO="${XDG_CONFIG_HOME:-$HOME/.config}/mako/config"
 
+# apps X11 (Steam, jogos, Wine): o niri põe o DISPLAY do xwayland-satellite; as apps lançadas
+# pelo D-Bus/systemd (Flatpak, portais) também precisam dele
+[ -n "$DISPLAY" ] && dbus-update-activation-environment --systemd DISPLAY >/dev/null 2>&1
+
 # pastas pessoais (Documentos, Transferências, ...) no idioma da sessão; não mexe nas que já existem
 xdg-user-dirs-update >/dev/null 2>&1
 
@@ -13,5 +17,9 @@ WALL=/usr/share/backgrounds/nexora/nexora-aurora.png
 W=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/nexora/wallpaper" 2>/dev/null); [ -f "$W" ] && WALL=$W
 swaybg -m fill -i "$WALL" >/dev/null 2>&1 &
 mako -c "$MAKO" >/dev/null 2>&1 &
+# a barra e a doca são Wayland (layer-shell): nada de X11 mesmo com o DISPLAY do xwayland-satellite.
+# Espera pelo daemon antes de abrir as janelas (sem isto, às vezes abriam duas vezes).
+export GDK_BACKEND=wayland
 eww -c "$EWW" daemon
-eww -c "$EWW" open-many bar dock
+for i in $(seq 50); do eww -c "$EWW" ping >/dev/null 2>&1 && break; sleep 0.1; done
+eww -c "$EWW" --no-daemonize open-many bar dock

@@ -129,6 +129,7 @@ class Settings(Adw.ApplicationWindow):
             ("network", "Network", "network-wireless-symbolic", self.page_network),
             ("bluetooth", "Bluetooth", "bluetooth-active-symbolic", self.page_bluetooth),
             ("power", "Power", "battery-good-symbolic", self.page_power),
+            ("gaming", "Gaming", "input-gaming-symbolic", self.page_gaming),
             ("keyboard", "Keyboard", "input-keyboard-symbolic", self.page_keyboard),
             ("about", "About", "help-about-symbolic", self.page_about),
         ]
@@ -651,6 +652,121 @@ class Settings(Adw.ApplicationWindow):
             gl.add(row)
             page.add(gl)
         return page
+
+    # -------------------------------------------------------------- Jogos (Flatpak + GameMode + kernel)
+    GAMES = [  # (id Flatpak, nome, descrição)
+        ("com.valvesoftware.Steam", "Steam", "Your Steam library, with Proton for Windows games"),
+        ("com.heroicgameslauncher.hgl", "Heroic", "Epic Games, GOG and Amazon games"),
+        ("net.lutris.Lutris", "Lutris", "Games from everywhere, emulators and Wine"),
+        ("net.davidotek.pupgui2", "ProtonUp-Qt", "Install Proton-GE and other compatibility tools"),
+    ]
+    LAYERS = [  # camadas Vulkan para as apps Flatpak (ramo = o do runtime do Steam)
+        ("org.freedesktop.Platform.VulkanLayer.MangoHud", "MangoHud", "FPS and performance overlay"),
+        ("org.freedesktop.Platform.VulkanLayer.gamescope", "Gamescope", "Valve's game compositor (upscaling, frame limit)"),
+    ]
+
+    def page_gaming(self):
+        page = self.prefs_page()
+        self.game_rows = {}
+        ga = Adw.PreferencesGroup(title="Game launchers", description="Installed from Flathub; they keep themselves up to date")
+        for app_id, name, desc in self.GAMES:
+            r = Adw.ActionRow(title=name, subtitle=desc)
+            b = Gtk.Button(valign=Gtk.Align.CENTER)
+            r.add_suffix(b)
+            ga.add(r)
+            self.game_rows[app_id] = (b, name, "app")
+        page.add(ga)
+        gl = Adw.PreferencesGroup(title="Tools for games")
+        for ref, name, desc in self.LAYERS:
+            r = Adw.ActionRow(title=name, subtitle=desc)
+            b = Gtk.Button(valign=Gtk.Align.CENTER)
+            r.add_suffix(b)
+            gl.add(r)
+            self.game_rows[ref] = (b, name, "layer")
+        self.mango = Adw.SwitchRow(title="Performance overlay in every Steam game",
+                                   subtitle="Turns on MangoHud for Steam (Shift+F12 hides it)")
+        gl.add(self.mango)
+        page.add(gl)
+
+        gp = Adw.PreferencesGroup(title="Under the hood",
+                                  description="Tip: in Steam, set a game's launch options to  gamemoderun %command%")
+        sched = "BORE (CachyOS)" if os.path.exists("/proc/sys/kernel/sched_bore") else "EEVDF"
+        items = (("Kernel", f"{os.uname().release} · scheduler {sched}"),
+                 ("NTSYNC", "Ready — faster Windows games in Proton/Wine" if os.path.exists("/dev/ntsync")
+                  else "Not available"),
+                 ("GameMode", "Ready — boosts the CPU while you play" if shutil.which("gamemoded")
+                  else "Not installed"))
+        for t, v in items:
+            gp.add(Adw.ActionRow(title=t, subtitle=v))
+        page.add(gp)
+        self.game_refresh()
+        return page
+
+    def flatpak_branch(self):
+        """Ramo do runtime do Steam (as camadas Vulkan têm de ser do mesmo)."""
+        out = run(["flatpak", "info", "--show-runtime", "com.valvesoftware.Steam"])
+        return out.strip().rsplit("/", 1)[-1] if out.strip() else ""
+
+    def game_refresh(self):
+        def work():
+            have = set(run(["flatpak", "list", "--columns=application"], 15).split())
+            mango = "MANGOHUD=1" in run(["flatpak", "override", "--user", "--show", "com.valvesoftware.Steam"])
+            GLib.idle_add(self.game_fill, have, mango)
+        threading.Thread(target=work, daemon=True).start()
+
+    def game_fill(self, have, mango):
+        steam = "com.valvesoftware.Steam" in have
+        for ref, (b, name, kind) in self.game_rows.items():
+            try:
+                b.disconnect(b.handler)
+            except (AttributeError, TypeError):
+                pass
+            inst = ref in have
+            if kind == "app":
+                b.set_label("Open" if inst else "Install")
+                b.set_css_classes([] if inst else ["suggested-action"])
+                b.handler = b.connect("clicked", lambda _b, r=ref, i=inst, n=name:
+                                      subprocess.Popen(["flatpak", "run", r]) if i else self.game_install(r, n, "app"))
+                b.set_sensitive(True)
+            else:
+                b.set_label("Installed" if inst else "Install")
+                b.set_css_classes([] if inst else ["suggested-action"])
+                b.set_sensitive(not inst and steam)
+                b.set_tooltip_text(None if steam else "Install Steam first")
+                b.handler = b.connect("clicked", lambda _b, r=ref, n=name: self.game_install(r, n, "layer"))
+        try:
+            self.mango.disconnect(self.mango.handler)
+        except (AttributeError, TypeError):
+            pass
+        self.mango.set_active(mango)
+        self.mango.set_sensitive(steam and "org.freedesktop.Platform.VulkanLayer.MangoHud" in have)
+        self.mango.handler = self.mango.connect("notify::active", self.game_mango)
+        return False
+
+    def game_install(self, ref, name, kind):
+        self.toast(f"Installing {name}… (this can take a few minutes)")
+        for b, n, _k in self.game_rows.values():
+            if n == name:
+                b.set_sensitive(False)
+                b.set_label("Installing…")
+
+        def work():
+            if kind == "layer":
+                br = self.flatpak_branch()
+                target = [f"runtime/{ref}/x86_64/{br}"] if br else [ref]
+            else:
+                target = [ref]
+            r = subprocess.run(["flatpak", "install", "--system", "-y", "--noninteractive", "flathub"] + target,
+                               capture_output=True, text=True)
+            GLib.idle_add(self.toast, f"{name} is installed" if r.returncode == 0 else f"Couldn't install {name}")
+            GLib.idle_add(self.game_refresh)
+        threading.Thread(target=work, daemon=True).start()
+
+    def game_mango(self, sw, _p):
+        if sw.get_active():
+            run(["flatpak", "override", "--user", "--env=MANGOHUD=1", "com.valvesoftware.Steam"])
+        else:
+            run(["flatpak", "override", "--user", "--unset-env=MANGOHUD", "com.valvesoftware.Steam"])
 
     # -------------------------------------------------------------- Teclado
     def page_keyboard(self):
