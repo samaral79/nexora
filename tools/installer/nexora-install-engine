@@ -1,5 +1,5 @@
 #!/bin/bash
-# nexora-install-engine — motor do instalador da Nexora Linux (corre como root).
+# nexora-install-engine — motor do instalador da Nexora Linux (corre como root, no live).
 #
 # Uso: nexora-install-engine <ficheiro.conf>      (a senha do utilizador chega pelo stdin, 1.ª linha)
 #
@@ -8,16 +8,22 @@
 # Saída para o instalador gráfico, uma por linha:
 #   STEP <n> <total> <texto>   |   PROGRESS <0-100>   |   LOG <texto>   |   ERROR <texto>   |   DONE
 #
-# Partições (GPT, arranca em BIOS e em UEFI):
-#   1  1 MiB   BIOS boot (GRUB i386-pc)
-#   2  512 MiB ESP (vfat)
-#   3  resto   raiz ext4
+# Disco A/B (GPT, só UEFI) — as atualizações escrevem na partição que não está em uso:
+#   1  1 GiB   nexora-esp       EFI (systemd-boot + um UKI por versão)
+#   2  10 GiB  nexora_<versão>  sistema A (imagem squashfs, só de leitura)
+#   3  10 GiB  _empty           sistema B (a próxima versão vem para aqui)
+#   4  resto   nexora-data      /var: /home, /etc alterado, Flatpak, AUR, registos
 set -euo pipefail
 export LC_ALL=C PATH=/usr/bin:/usr/sbin
 
-SRC=${NEXORA_SRC:-/run/live/rootfs}      # camada só-de-leitura do live (squashfs)
+MEDIUM=${NEXORA_MEDIUM:-/run/live/medium}
 T=/mnt/nexora-target
+IMGMNT=/run/nexora-install/image
 TOTAL=7
+GUID_ESP=C12A7328-F81F-11D2-BA4B-00A0C93EC93B
+GUID_ROOT=4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709     # root x86-64 (Discoverable Partitions)
+GUID_VAR=4D21B016-B534-45C2-A9FB-5C16E091FD2D      # /var
+ROOT_SIZE=10GiB
 
 say()   { echo "$*"; }
 step()  { say "STEP $1 $TOTAL $2"; }
@@ -28,7 +34,7 @@ trap 'fail "failed at line $LINENO: $BASH_COMMAND"' ERR
 
 cleanup() {
     trap - ERR
-    for m in $T/boot/efi $T/sys/firmware/efi/efivars $T/dev/pts $T/dev $T/proc $T/sys $T/run $T; do
+    for m in $T/sys/firmware/efi/efivars $T/dev/pts $T/dev $T/proc $T/sys $T/run $T/boot $T/etc $T/var $T $IMGMNT; do
         mountpoint -q "$m" 2>/dev/null && umount -l "$m" || true
     done
 }
@@ -41,13 +47,19 @@ IFS= read -r PASSWORD || true
 
 [ "${CONFIRM:-}" = yes ] || fail "missing CONFIRM=yes"
 [ -b "$DISK" ] || fail "$DISK is not a disk"
-[ -d "$SRC/usr/bin" ] || fail "system not found at $SRC (are you in the live session?)"
+[ -d /sys/firmware/efi ] || fail "this computer started in legacy BIOS mode; Nexora needs UEFI (turn off CSM/Legacy in the firmware settings)"
 [[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail "invalid username: $USERNAME"
 [ -n "$PASSWORD" ] || fail "empty password"
 [ -e "/usr/share/zoneinfo/$TIMEZONE" ] || fail "unknown time zone: $TIMEZONE"
+SRCIMG=$(ls $MEDIUM/nexora/nexora_*.root.raw 2>/dev/null | tail -1)
+[ -n "$SRCIMG" ] || fail "system image not found on the live medium"
+VER=$(basename "$SRCIMG" .root.raw); VER=${VER#nexora_}
+UKI=$MEDIUM/nexora/nexora_$VER.efi
+[ -f "$UKI" ] || fail "boot image nexora_$VER.efi not found on the live medium"
+[ "$(blockdev --getsize64 "$DISK")" -ge $((30 * 1000 ** 3)) ] || fail "$DISK is smaller than 30 GB"
 
 # nunca instalar por cima do próprio live
-LIVEDEV=$(findmnt -no SOURCE /run/live/medium 2>/dev/null || true)
+LIVEDEV=$(findmnt -no SOURCE "$MEDIUM" 2>/dev/null || true)
 if [ -n "$LIVEDEV" ]; then
     LIVEDISK=/dev/$(lsblk -no PKNAME "$LIVEDEV" 2>/dev/null | head -1)
     [ "$LIVEDISK" = /dev/ ] && LIVEDISK=$LIVEDEV
@@ -55,7 +67,7 @@ if [ -n "$LIVEDEV" ]; then
 fi
 
 part() { case "$DISK" in *nvme*|*mmcblk*|*loop*) echo "${DISK}p$1" ;; *) echo "${DISK}$1" ;; esac; }
-P1=$(part 1); P2=$(part 2); P3=$(part 3)
+P1=$(part 1); P2=$(part 2); P3=$(part 3); P4=$(part 4)
 
 # ---------------------------------------------------------------- 1. partições
 step 1 "Preparing disk $DISK"
@@ -63,63 +75,68 @@ prog 2
 cleanup
 for p in $(lsblk -lnpo NAME "$DISK" | tail -n +2); do umount -l "$p" 2>/dev/null || true; swapoff "$p" 2>/dev/null || true; done
 wipefs -af "$DISK" >/dev/null
-sfdisk -q --wipe always "$DISK" << "EOF"
+sfdisk -q --wipe always "$DISK" << EOF
 label: gpt
-size=1MiB, type=21686148-6449-6E6F-744E-656564454649, name="bios_grub"
-size=512MiB, type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, name="EFI"
-type=0FC63DAF-8483-4772-8E79-3D69D8477DE4, name="Nexora"
+size=1GiB, type=$GUID_ESP, name="nexora-esp"
+size=$ROOT_SIZE, type=$GUID_ROOT, name="nexora_$VER"
+size=$ROOT_SIZE, type=$GUID_ROOT, name="_empty"
+type=$GUID_VAR, name="nexora-data"
 EOF
 partx -u "$DISK" 2>/dev/null || true
 udevadm settle 2>/dev/null || true
-for i in $(seq 50); do [ -b "$P3" ] && break; sleep 0.2; done
-[ -b "$P3" ] || fail "the new partitions did not show up"
-log "partitions created: $P1 $P2 $P3"
-prog 5
+for i in $(seq 50); do [ -b "$P4" ] && break; sleep 0.2; done
+[ -b "$P4" ] || fail "the new partitions did not show up"
+log "partitions: EFI $P1, system A $P2 (nexora_$VER), system B $P3, data $P4"
+prog 4
 
 # ---------------------------------------------------------------- 2. sistemas de ficheiros
 step 2 "Formatting"
-mkfs.vfat -F 32 -n NEXORA_ESP "$P2" >/dev/null
-mkfs.ext4 -F -q -L nexora "$P3"
-mkdir -p $T
-mount "$P3" $T
-mkdir -p $T/boot/efi
-mount "$P2" $T/boot/efi
-prog 8
+mkfs.vfat -F 32 -n NEXORA_ESP "$P1" >/dev/null
+mkfs.ext4 -F -q -L nexora-data "$P4"
+prog 6
 
-# ---------------------------------------------------------------- 3. copiar o sistema
-step 3 "Copying Nexora to disk"
-rsync -aHAX --numeric-ids --no-inc-recursive --info=progress2 \
-      --exclude=/dev/ --exclude=/proc/ --exclude=/sys/ --exclude=/run/ --exclude=/tmp/ \
-      --exclude=/boot/efi/ --exclude=/home/nexora/ --exclude=/lost+found/ \
-      "$SRC/" $T/ 2>&1 |
+# ---------------------------------------------------------------- 3. imagem do sistema
+step 3 "Copying Nexora $VER to disk"
+SIZE=$(stat -c %s "$SRCIMG")
+dd if="$SRCIMG" of="$P2" bs=4M conv=fsync status=progress 2>&1 |
     tr '\r' '\n' | while read -r line; do
-        if [[ "$line" =~ ([0-9]+)%\  ]]; then
-            echo "PROGRESS $(( 8 + ${BASH_REMATCH[1]} * 72 / 100 ))"
+        if [[ "$line" =~ ^([0-9]+)\ bytes ]]; then
+            echo "PROGRESS $(( 6 + ${BASH_REMATCH[1]} * 64 / SIZE ))"
         fi
     done
-[ "${PIPESTATUS[0]}" -eq 0 ] || fail "copy failed"
-mkdir -p $T/{dev,proc,sys,run,tmp,home}
-chmod 1777 $T/tmp
-prog 80
+[ "${PIPESTATUS[0]}" -eq 0 ] || fail "copying the system image failed"
+log "system image written to $P2"
+prog 70
 
-# ---------------------------------------------------------------- 4. configurar
-step 4 "Configuring the system"
+# ---------------------------------------------------------------- 4. montar como no arranque
+step 4 "Preparing your data partition"
+mkdir -p $T $IMGMNT
+mount -t squashfs -o ro "$P2" $T
+mount "$P4" $T/var
+# o /var da imagem é o ponto de partida da partição de dados
+mount -t squashfs -o ro "$P2" $IMGMNT
+cp -a $IMGMNT/var/. $T/var/
+umount $IMGMNT
+V=$T/var
+mkdir -p $V/lib/nexora/etc/upper $V/lib/nexora/etc/work $V/home $V/roothome $V/usrlocal $V/srv
+chmod 700 $V/roothome
+echo "$VER" > $V/lib/nexora/var-version
+mount -t overlay overlay -o lowerdir=$T/etc,upperdir=$V/lib/nexora/etc/upper,workdir=$V/lib/nexora/etc/work $T/etc
+mount "$P1" $T/boot
 mount --bind /dev $T/dev
 mount --bind /dev/pts $T/dev/pts
 mount -t proc proc $T/proc
 mount -t sysfs sysfs $T/sys
 mount -t tmpfs tmpfs $T/run
+mount -t efivarfs efivarfs $T/sys/firmware/efi/efivars 2>/dev/null || true
 in_t() { chroot $T /usr/bin/env -i PATH=/usr/bin:/usr/sbin HOME=/root LC_ALL=C "$@"; }
+prog 78
 
-ROOT_UUID=$(blkid -s UUID -o value "$P3")
-ROOT_PARTUUID=$(blkid -s PARTUUID -o value "$P3")
-ESP_UUID=$(blkid -s UUID -o value "$P2")
-cat > $T/etc/fstab << EOF
-# /etc/fstab — gerado pelo instalador da Nexora
-UUID=$ROOT_UUID  /          ext4  defaults,noatime   1 1
-UUID=$ESP_UUID   /boot/efi  vfat  rw,relatime,umask=0077  0 2
-EOF
-
+# ---------------------------------------------------------------- 5. configurar
+step 5 "Configuring the system"
+in_t systemd-machine-id-setup >/dev/null
+ESP_UUID=$(blkid -s UUID -o value "$P1")
+echo "UUID=$ESP_UUID  /boot  vfat  umask=0077,noatime  0 2" >> $T/etc/fstab
 echo "$HOSTNAME" > $T/etc/hostname
 cat > $T/etc/hosts << EOF
 127.0.0.1 localhost
@@ -149,71 +166,35 @@ printf '[Seat:*]\nuser-session=%s\n' "$SESSION" > $T/etc/lightdm/lightdm.conf.d/
 [ -f $T/etc/niri/config.kdl ] && sed -i "s/^\( *layout\) \"[a-z]*\"/\1 \"$XKBLAYOUT\"/" $T/etc/niri/config.kdl
 log "default session: $SESSION"
 
-# tirar tudo o que é só do live
-if [ -f $T/etc/nexora-live ]; then
-    in_t userdel -r nexora 2>/dev/null || in_t userdel nexora 2>/dev/null || true
-    while read -r f; do [ -n "$f" ] && rm -rf "$T/${f#/}"; done < $T/etc/nexora-live
-    rm -f $T/etc/nexora-live
-fi
-: > $T/etc/machine-id
-rm -f $T/etc/ssh/ssh_host_*
-
-# utilizador
+# utilizador (a pasta pessoal fica em /var/home, na partição de dados)
 in_t groupadd -f autologin
-if in_t getent passwd "$USERNAME" >/dev/null; then in_t userdel -r "$USERNAME" || true; fi
 in_t useradd -m -c "$FULLNAME" -G wheel,video,audio,input,users,lpadmin -s /bin/bash "$USERNAME"
 printf '%s:%s\n' "$USERNAME" "$PASSWORD" | in_t chpasswd
-in_t passwd -l root >/dev/null      # root bloqueado: administra-se com sudo (grupo wheel)
+in_t usermod -p "*" root           # root sem senha (não entra com senha); administra-se com sudo
 log "user $USERNAME created"
-# a sessão escolhida fica guardada para o utilizador (o greeter dá prioridade à sessão
-# do utilizador e ao seu próprio estado, por isso limpa-se o que veio da imagem)
 rm -rf $T/var/lib/lightdm/.cache/lightdm-gtk-greeter $T/var/cache/lightdm/dmrc/*
 printf '[Desktop]\nSession=%s\n' "$SESSION" > $T/home/$USERNAME/.dmrc
 in_t chown "$USERNAME:" /home/$USERNAME/.dmrc
 mkdir -p $T/var/cache/lightdm/dmrc
 cp $T/home/$USERNAME/.dmrc $T/var/cache/lightdm/dmrc/$USERNAME.dmrc
-# no sistema instalado o instalador já não faz sentido nos menus
-rm -f $T/usr/share/applications/nexora-installer.desktop
-prog 85
+prog 88
 
-# ---------------------------------------------------------------- 5. arranque
-step 5 "Installing GRUB"
-KERNEL=$(cd $T/boot && ls vmlinuz-* | sort -V | tail -1)
-if [ -d /sys/firmware/efi ]; then
-    mount -t efivarfs efivarfs $T/sys/firmware/efi/efivars 2>/dev/null || true
-    in_t grub-install --target=x86_64-efi --efi-directory=/boot/efi --bootloader-id=Nexora --recheck \
-        >/dev/null 2>&1 && log "GRUB UEFI installed (Nexora entry)" || log "warning: UEFI boot entry not created"
+# ---------------------------------------------------------------- 6. arranque
+step 6 "Installing the boot loader"
+if in_t bootctl install --esp-path=/boot >/dev/null 2>&1; then
+    log "systemd-boot installed (Nexora entry in the firmware)"
+else
+    in_t bootctl install --esp-path=/boot --no-variables >/dev/null
+    log "systemd-boot installed (no firmware entry; the disk boots as a removable drive)"
 fi
-# cópia "removível" (firmwares que ignoram a NVRAM) + BIOS no mesmo disco
-in_t grub-install --target=x86_64-efi --efi-directory=/boot/efi --removable --no-nvram >/dev/null 2>&1 \
-    && log "GRUB UEFI (removable) installed" || log "warning: removable GRUB UEFI failed"
-in_t grub-install --target=i386-pc "$DISK" >/dev/null 2>&1 \
-    && log "GRUB BIOS installed" || log "warning: GRUB BIOS failed"
-cat > $T/boot/grub/grub.cfg << EOF
-# gerado pelo instalador da Nexora
-set default=0
-set timeout=3
-insmod part_gpt
-insmod ext2
-insmod all_video
-search --no-floppy --fs-uuid --set=root $ROOT_UUID
-set gfxpayload=keep
-set menu_color_normal=light-gray/black
-set menu_color_highlight=black/cyan
+printf 'timeout 3\nconsole-mode keep\n' > $T/boot/loader/loader.conf
+install -Dm644 "$UKI" "$T/boot/EFI/Linux/nexora_$VER.efi"
+log "boot image nexora_$VER.efi installed"
+prog 96
 
-menuentry "Nexora Linux" {
-        linux   /boot/$KERNEL root=PARTUUID=$ROOT_PARTUUID ro quiet loglevel=3
-}
-menuentry "Nexora Linux (recovery mode)" {
-        linux   /boot/$KERNEL root=PARTUUID=$ROOT_PARTUUID ro systemd.unit=rescue.target
-}
-EOF
-prog 95
-
-# ---------------------------------------------------------------- 6. fim
-step 6 "Finishing"
+# ---------------------------------------------------------------- 7. fim
+step 7 "Finishing"
 sync
 cleanup
 prog 100
-step 7 "Installation complete"
 say DONE

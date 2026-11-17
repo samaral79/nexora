@@ -1,0 +1,18 @@
+# Nexora: imagem do sistema (squashfs só de leitura) para a partição A/B livre.
+# O URL é posto pela fase U (NX_UPDATE_URL); os ficheiros vêm com SHA256SUMS assinado (Verify=yes).
+[Transfer]
+ProtectVersion=%A
+Verify=yes
+
+[Source]
+Type=url-file
+Path=@URL@
+MatchPattern=nexora_@v.root.raw
+
+[Target]
+Type=partition
+Path=auto
+MatchPattern=nexora_@v
+MatchPartitionType=root
+ReadOnly=yes
+InstancesMax=2

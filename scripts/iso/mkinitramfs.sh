@@ -1,5 +1,5 @@
 #!/bin/bash
-# Gera o initramfs do live a partir dos binários da própria Nexora (root, no Fedora).
+# Gera o initramfs da Nexora (live e sistema instalado) a partir dos binários da própria Nexora.
 # Uso: sudo ./scripts/iso/mkinitramfs.sh <raiz da Nexora> <saída.img>
 set -euo pipefail
 ROOT=${1:?raiz}; OUT=${2:?saída}
@@ -13,7 +13,7 @@ mkdir -p $W/usr/{bin,sbin,lib} $W/{dev,proc,sys,run,sysroot,etc}
 ln -s usr/bin $W/bin; ln -s usr/sbin $W/sbin; ln -s usr/lib $W/lib
 mkdir -p $W/lib64
 
-BINS="bash mount umount switch_root blkid losetup mkdir sleep cat ls ln seq dmesg findmnt"
+BINS="bash mount umount switch_root blkid losetup mkdir sleep cat ls ln seq dmesg findmnt cp chroot chmod head tail e2fsck"
 copy_file() {   # copia um ficheiro da raiz da Nexora mantendo o caminho (segue symlinks)
     local f=$1
     mkdir -p "$W$(dirname "$f")"
@@ -28,7 +28,7 @@ for b in $BINS; do
     done
 done
 ln -sf bash $W/usr/bin/sh
-install -m755 "$PROJ/tools/iso/live-init" $W/init
+install -m755 "$PROJ/tools/iso/nexora-init" $W/init
 mknod -m 600 $W/dev/console c 5 1
 mknod -m 666 $W/dev/null c 1 3
 

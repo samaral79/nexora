@@ -90,7 +90,7 @@ def list_disks():
             continue
         if re.match(r"^(loop|sr|zram|ram|fd)", d["name"]) or d["path"] == live:
             continue
-        if int(d.get("size") or 0) < 8 * 10**9:
+        if int(d.get("size") or 0) < 30 * 10**9:   # A/B: EFI + 2 × 10 GB + dados
             continue
         res.append(d)
     return res
@@ -231,7 +231,7 @@ class Installer(Gtk.Assistant):
             self.disk_store.append([d["path"], (d.get("model") or "").strip() or "—",
                                     human(int(d["size"])), (d.get("tran") or "").upper()])
         self.disk_note.set_text("" if len(self.disk_store) else
-                                "No disk with at least 8 GB found (besides the live medium).")
+                                "No disk with at least 30 GB found (besides the live medium).")
         self.set_page_complete(self.p_disk, False)
 
     def on_disk_changed(self, sel):

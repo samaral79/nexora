@@ -6,3 +6,5 @@ book/
 logs/
 sources-blfs/
 vm/
+/release/
+/release-work/

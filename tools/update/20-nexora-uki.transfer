@@ -1,0 +1,22 @@
+# Nexora: kernel + initramfs + linha de comando num só ficheiro (UKI) na partição EFI.
+# Entra com 3 tentativas: se não arrancar bem 3 vezes, o systemd-boot volta à versão anterior.
+[Transfer]
+ProtectVersion=%A
+Verify=yes
+
+[Source]
+Type=url-file
+Path=@URL@
+MatchPattern=nexora_@v.efi
+
+[Target]
+Type=regular-file
+Path=/EFI/Linux
+PathRelativeTo=boot
+MatchPattern=nexora_@v+@l-@d.efi \
+             nexora_@v+@l.efi \
+             nexora_@v.efi
+Mode=0444
+TriesLeft=3
+TriesDone=0
+InstancesMax=2

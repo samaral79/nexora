@@ -1,0 +1,116 @@
+#!/bin/bash
+# /init do initramfs da Nexora (o mesmo para o live e para o sistema instalado).
+#
+# Instalado (root=PARTLABEL=nexora_<versão>, vem no UKI):
+#   a imagem da versão (squashfs, só de leitura) é a raiz; a partição nexora-data monta-se em /var;
+#   o /etc é a imagem + as tuas alterações (overlay com a camada de cima em /var/lib/nexora/etc).
+#   O /home, o /root e o /usr/local vivem em /var (ligações simbólicas na imagem).
+# Live (nexora.live): a mesma imagem vem do meio de arranque, com uma camada em RAM por cima,
+#   e o live-setup cria o utilizador live e abre o instalador.
+#
+# Parâmetros: nexora.label=NEXORA_LIVE  nexora.shell (shell antes de arrancar)
+export PATH=/usr/bin:/usr/sbin
+
+mount -t proc proc /proc
+mount -t sysfs sysfs /sys
+mount -t devtmpfs devtmpfs /dev
+mkdir -p /dev/pts && mount -t devpts devpts /dev/pts
+mount -t tmpfs -o mode=755,nosuid,nodev tmpfs /run
+
+LABEL=NEXORA_LIVE
+ROOTLABEL=
+LIVE=
+SHELL_FIRST=
+for arg in $(cat /proc/cmdline); do
+    case $arg in
+        root=PARTLABEL=*) ROOTLABEL=${arg#root=PARTLABEL=} ;;
+        nexora.live)      LIVE=1 ;;
+        nexora.label=*)   LABEL=${arg#nexora.label=}; LIVE=1 ;;
+        nexora.shell)     SHELL_FIRST=1 ;;
+        quiet)            QUIET=1 ;;
+    esac
+done
+[ -z "$ROOTLABEL" ] && LIVE=1
+msg() { [ -n "${QUIET:-}" ] || echo "nexora: $*"; }
+
+rescue() {
+    echo
+    echo "nexora: ERRO — $*"
+    if [ -z "$LIVE" ] && [ -z "$SHELL_FIRST" ]; then
+        # sistema instalado: reiniciar conta como arranque falhado; à 3.ª o systemd-boot volta
+        # sozinho à versão anterior. Enter dá uma shell em vez disso.
+        echo "Enter: shell de emergência. Sem resposta, o computador reinicia em 30 s"
+        echo "(ao fim de 3 tentativas volta sozinho à versão anterior da Nexora)."
+        if ! read -r -t 30; then
+            echo b > /proc/sysrq-trigger
+        fi
+    fi
+    echo "A abrir uma shell de emergência (escreve 'exit' para tentar continuar)."
+    /usr/bin/bash
+}
+
+wait_dev() {   # wait_dev LABEL|PARTLABEL valor
+    local d i
+    for i in $(seq 1 150); do
+        d=$(blkid -o device -t "$1=$2" 2>/dev/null | head -1)
+        [ -n "$d" ] && [ -b "$d" ] && { echo "$d"; return 0; }
+        sleep 0.2
+    done
+    return 1
+}
+
+mkdir -p /sysroot
+if [ -n "$LIVE" ]; then
+    # ------------------------------------------------------------ live
+    msg "à procura do meio com a label $LABEL"
+    DEV=$(wait_dev LABEL "$LABEL") || rescue "não encontrei nenhum disco com a label $LABEL"
+    mkdir -p /run/live/medium /run/live/rootfs /run/live/rw
+    mount -o ro "$DEV" /run/live/medium 2>/dev/null || mount -t iso9660 -o ro "$DEV" /run/live/medium \
+        || rescue "não consegui montar $DEV"
+    IMG=$(ls /run/live/medium/nexora/nexora_*.root.raw 2>/dev/null | tail -1)
+    [ -n "$IMG" ] || rescue "falta a imagem nexora_*.root.raw no meio de arranque"
+    mount -t squashfs -o ro,loop "$IMG" /run/live/rootfs || rescue "não consegui montar a imagem"
+    mount -t tmpfs -o mode=755 tmpfs /run/live/rw
+    mkdir -p /run/live/rw/upper /run/live/rw/work
+    mount -t overlay overlay \
+        -o lowerdir=/run/live/rootfs,upperdir=/run/live/rw/upper,workdir=/run/live/rw/work /sysroot \
+        || rescue "não consegui montar o overlay"
+    # o live prepara-se aqui, tudo na RAM (utilizador live, login automático, instalador)
+    [ -f /run/live/medium/nexora/dev-key.pub ] && cp /run/live/medium/nexora/dev-key.pub /sysroot/tmp/
+    [ -x /sysroot/usr/lib/nexora/live-setup ] && chroot /sysroot /usr/lib/nexora/live-setup
+    msg "sistema live montado a partir de $DEV"
+else
+    # ------------------------------------------------------------ instalado (A/B)
+    msg "a arrancar a versão $ROOTLABEL"
+    DEV=$(wait_dev PARTLABEL "$ROOTLABEL") || rescue "não encontrei a partição $ROOTLABEL"
+    mount -t squashfs -o ro "$DEV" /sysroot || rescue "não consegui montar $DEV"
+    DATA=$(wait_dev PARTLABEL nexora-data) || rescue "não encontrei a partição nexora-data"
+    e2fsck -p "$DATA" >/dev/null 2>&1
+    [ $? -ge 4 ] && rescue "o e2fsck encontrou erros em $DATA que tem de ver à mão"
+    mount -o rw,noatime "$DATA" /sysroot/var || rescue "não consegui montar $DATA em /var"
+    V=/sysroot/var
+    mkdir -p $V/lib/nexora/etc/upper $V/lib/nexora/etc/work $V/home $V/roothome $V/usrlocal $V/srv
+    chmod 700 $V/roothome
+    # versão nova: o que a imagem traz em /var e ainda não existe no disco é copiado (nada é substituído)
+    VER=$(. /sysroot/usr/lib/os-release; echo "$IMAGE_VERSION")
+    if [ "$(cat $V/lib/nexora/var-version 2>/dev/null)" != "$VER" ]; then
+        mkdir -p /run/nexora/image
+        if mount -t squashfs -o ro "$DEV" /run/nexora/image; then
+            cp -a --update=none /run/nexora/image/var/. $V/ 2>/dev/null
+            umount /run/nexora/image
+            echo "$VER" > $V/lib/nexora/var-version
+            rm -f $V/lib/nexora/etc/upper/ld.so.cache
+            msg "/var atualizado para a versão $VER"
+        fi
+    fi
+    mount -t overlay overlay \
+        -o lowerdir=/sysroot/etc,upperdir=$V/lib/nexora/etc/upper,workdir=$V/lib/nexora/etc/work /sysroot/etc \
+        || rescue "não consegui montar o /etc"
+    msg "versão $VER montada"
+fi
+
+[ -n "$SHELL_FIRST" ] && rescue "shell pedida com nexora.shell"
+
+# o switch_root leva /dev /proc /sys /run para o sistema novo
+umount /dev/pts 2>/dev/null
+exec switch_root /sysroot /usr/lib/systemd/systemd
