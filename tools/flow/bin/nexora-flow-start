@@ -17,6 +17,8 @@ WALL=/usr/share/backgrounds/nexora/nexora-aurora.png
 W=$(cat "${XDG_CONFIG_HOME:-$HOME/.config}/nexora/wallpaper" 2>/dev/null); [ -f "$W" ] && WALL=$W
 swaybg -m fill -i "$WALL" >/dev/null 2>&1 &
 mako -c "$MAKO" >/dev/null 2>&1 &
+# bloqueio e ecrã apagado quando o PC fica parado (tempos nas Definições → Power)
+nexora-idle start >/dev/null 2>&1 &
 # a barra e a doca são Wayland (layer-shell): nada de X11 mesmo com o DISPLAY do xwayland-satellite.
 # Espera pelo daemon antes de abrir as janelas (sem isto, às vezes abriam duas vezes).
 export GDK_BACKEND=wayland

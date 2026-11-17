@@ -15,6 +15,12 @@ focused = None
 last = None
 
 
+def pretty_app(app_id):
+    """steam -> Steam, org.gnome.Nautilus -> Nautilus"""
+    name = (app_id or "").rsplit(".", 1)[-1]
+    return name[:1].upper() + name[1:]
+
+
 def emit():
     global last
     outs = {w.get("output") for w in workspaces.values() if w.get("is_focused")} or {None}
@@ -27,7 +33,8 @@ def emit():
     f = windows.get(focused) or {}
     data = {
         "ws": [{"idx": w["idx"], "active": bool(w.get("is_active")), "windows": count.get(w["id"], 0)} for w in ws],
-        "title": (f.get("title") or "")[:80],
+        # apps X11 (xwayland-satellite) às vezes não têm título: mostra-se o nome da app
+        "title": (f.get("title") or pretty_app(f.get("app_id")))[:80],
         "app": f.get("app_id") or "",
         # apps abertas (para os pontos da doca), em minúsculas para comparar à vontade
         "apps": sorted({(w.get("app_id") or "").lower() for w in windows.values()} - {""}),

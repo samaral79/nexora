@@ -1,0 +1,28 @@
+#!/bin/sh
+# Ecrã parado: bloqueia e depois apaga. Não faz nada enquanto há um jogo ou um vídeo a correr
+# (os comandos de jogo não contam como "mexer" para o compositor).
+# Tempos em ~/.config/nexora/idle: "LOCK OFF" em segundos (0 = nunca). Muda-se nas Definições → Power.
+CONF="${XDG_CONFIG_HOME:-$HOME/.config}/nexora/idle"
+
+busy() {
+    pgrep -f SteamLaunch >/dev/null 2>&1 && return 0          # jogo do Steam (também em Flatpak)
+    gamemoded -s 2>/dev/null | grep -q "is active" && return 0  # jogo com gamemoderun
+    playerctl -a status 2>/dev/null | grep -q Playing && return 0  # vídeo ou música
+    return 1
+}
+
+case "$1" in
+    start)
+        pkill -u "$(id -u)" -x swayidle 2>/dev/null
+        set -- $(cat "$CONF" 2>/dev/null)
+        LOCK=${1:-300}; OFF=${2:-600}
+        ARGS=""
+        [ "$LOCK" -gt 0 ] 2>/dev/null && ARGS="$ARGS timeout $LOCK 'nexora-idle lock'"
+        [ "$OFF" -gt 0 ] 2>/dev/null && ARGS="$ARGS timeout $OFF 'nexora-idle screen-off'"
+        eval exec swayidle -w $ARGS before-sleep "'nexora-idle lock-now'" lock "'nexora-idle lock-now'"
+        ;;
+    lock)       busy || exec "$0" lock-now ;;
+    lock-now)   pgrep -u "$(id -u)" -x swaylock >/dev/null || swaylock -f ;;   # só um de cada vez
+    screen-off) busy || niri msg action power-off-monitors ;;
+    *) echo "uso: nexora-idle start|lock|lock-now|screen-off"; exit 1 ;;
+esac

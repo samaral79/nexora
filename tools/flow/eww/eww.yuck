@@ -110,7 +110,7 @@
         (label :class "qs-user" :xalign 0 :text {st.user})
         (label :class "qs-sub" :xalign 0 :text today))
       (pbtn :icon "/usr/share/icons/Papirus/24x24/apps/preferences-system.svg" :tip "Settings" :cmd "nexora-settings &")
-      (pbtn :icon "/usr/share/icons/Papirus/24x24/apps/system-lock-screen.svg" :tip "Lock" :cmd "swaylock -f &")
+      (pbtn :icon "/usr/share/icons/Papirus/24x24/apps/system-lock-screen.svg" :tip "Lock" :cmd "nexora-idle lock-now &")
       (pbtn :icon "/usr/share/icons/Papirus/24x24/apps/system-shutdown.svg" :tip "Power" :cmd "${EWW} open powermenu"))
     (box :class "slider" :space-evenly false :spacing 10
       (button :class "icon-btn" :tooltip "Mute" :onclick "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"
@@ -158,7 +158,7 @@
   :focusable false
   :namespace "nexora-power"
   (box :class "qs" :orientation "v" :space-evenly false :spacing 2
-    (pitem :icon "/usr/share/icons/Papirus/24x24/apps/system-lock-screen.svg" :text "Lock" :cmd "swaylock -f &")
+    (pitem :icon "/usr/share/icons/Papirus/24x24/apps/system-lock-screen.svg" :text "Lock" :cmd "nexora-idle lock-now &")
     (pitem :icon "/usr/share/icons/Papirus/24x24/apps/system-log-out.svg" :text "Log out" :cmd "niri msg action quit --skip-confirmation")
     (pitem :icon "/usr/share/icons/Papirus/24x24/apps/system-suspend.svg" :text "Suspend" :cmd "systemctl suspend")
     (pitem :icon "/usr/share/icons/Papirus/24x24/apps/system-reboot.svg" :text "Restart" :cmd "systemctl reboot")

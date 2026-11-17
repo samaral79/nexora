@@ -14,7 +14,7 @@ rm -f /etc/lightdm/lightdm.conf.d/99-teste-autologin.conf
 echo "# Nexora live: a raiz é montada pelo initramfs (squashfs + overlay em RAM)" > /etc/fstab
 
 # utilizador live: sem senha, com sudo sem senha e login automático
-getent passwd $LIVEUSER >/dev/null || useradd -m -c "Nexora Live" -G wheel,video,audio,input,users -s /bin/bash $LIVEUSER
+getent passwd $LIVEUSER >/dev/null || useradd -m -c "Nexora Live" -G wheel,video,audio,input,users,lpadmin -s /bin/bash $LIVEUSER
 passwd -d $LIVEUSER >/dev/null
 echo "$LIVEUSER ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/90-nexora-live
 chmod 440 /etc/sudoers.d/90-nexora-live

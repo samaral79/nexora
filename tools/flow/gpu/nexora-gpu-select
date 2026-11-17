@@ -1,0 +1,47 @@
+#!/bin/sh
+# Escolhe o driver das placas NVIDIA no arranque, antes de o udev carregar módulos.
+#   RTX 20 / GTX 16 em diante (suportadas pelo módulo aberto da NVIDIA) -> driver NVIDIA
+#   placas mais antigas, ou nexora.nvidia=nouveau                       -> nouveau + NVK (Mesa)
+# Forçar: nexora.nvidia=nvidia|nouveau no arranque, ou NVIDIA_DRIVER=... em /etc/nexora/gpu.conf.
+IDS=/usr/share/nexora/nvidia-open-ids
+RUN=/run/modprobe.d/nexora-gpu.conf
+
+mode=auto
+[ -r /etc/nexora/gpu.conf ] && . /etc/nexora/gpu.conf
+mode=${NVIDIA_DRIVER:-$mode}
+for a in $(cat /proc/cmdline); do
+    case $a in
+        nexora.nvidia=*) mode=${a#*=} ;;
+        nomodeset) exit 0 ;;          # gráficos seguros: nem nvidia nem nouveau
+    esac
+done
+
+use=
+for d in /sys/bus/pci/devices/*; do
+    [ "$(cat "$d/vendor")" = 0x10de ] || continue
+    case $(cat "$d/class") in 0x03*) ;; *) continue ;; esac
+    id=$(cat "$d/device"); id=${id#0x}
+    if [ "$mode" = nvidia ] || { [ "$mode" = auto ] && grep -qix "$id" "$IDS"; }; then
+        use=nvidia
+    else
+        use=${use:-nouveau}
+    fi
+done
+[ -n "$use" ] || exit 0               # sem NVIDIA: nada a fazer
+
+mkdir -p /run/modprobe.d
+if [ "$use" = nvidia ]; then
+    echo "blacklist nouveau" > "$RUN"
+    echo "nexora-gpu-select: placa NVIDIA suportada, a carregar o driver NVIDIA"
+    if modprobe nvidia_drm; then
+        modprobe nvidia_uvm 2>/dev/null || true
+    else
+        echo "nexora-gpu-select: o driver NVIDIA falhou, a voltar ao nouveau"
+        rm -f "$RUN"; modprobe -r nvidia_drm nvidia_modeset nvidia 2>/dev/null
+    fi
+else
+    # o firmware GSP dá ao nouveau reclocking a sério nas placas Turing em diante
+    echo "options nouveau config=NvGspRm=1" > "$RUN"
+    echo "nexora-gpu-select: a usar nouveau + NVK"
+fi
+exit 0

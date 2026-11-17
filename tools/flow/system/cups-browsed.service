@@ -1,0 +1,11 @@
+[Unit]
+Description=Make network printers available automatically
+Requires=cups.service
+Wants=avahi-daemon.service
+After=cups.service avahi-daemon.service network-online.target
+
+[Service]
+ExecStart=/usr/sbin/cups-browsed
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=Nexora: escolher o driver da placa NVIDIA
+DefaultDependencies=no
+After=systemd-tmpfiles-setup-dev-early.service
+Before=systemd-udev-trigger.service systemd-modules-load.service
+ConditionPathExists=/usr/share/nexora/nvidia-open-ids
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/nexora-gpu-select
+
+[Install]
+WantedBy=sysinit.target

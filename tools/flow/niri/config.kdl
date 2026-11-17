@@ -16,6 +16,8 @@ input {
         dwt
     }
     focus-follows-mouse max-scroll-amount="0%"
+    // o botão de ligar desliga o PC (logind), como nas outras distros; o niri suspendia
+    disable-power-key-handling
 }
 
 layout {

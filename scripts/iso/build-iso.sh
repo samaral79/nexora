@@ -108,6 +108,10 @@ menuentry "Nexora Linux $VER  (live, safe graphics)" {
         linux  /boot/vmlinuz $CMD nomodeset quiet loglevel=3 console=ttyS0,115200 console=tty0
         initrd /boot/initramfs.img
 }
+menuentry "Nexora Linux $VER  (live, NVIDIA open driver nouveau)" {
+        linux  /boot/vmlinuz $CMD nexora.nvidia=nouveau quiet loglevel=3 console=ttyS0,115200 console=tty0
+        initrd /boot/initramfs.img
+}
 menuentry "Nexora Linux $VER  (live, verbose boot)" {
         linux  /boot/vmlinuz $CMD console=ttyS0,115200 console=tty0
         initrd /boot/initramfs.img

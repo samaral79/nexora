@@ -161,7 +161,7 @@ rm -f $T/etc/ssh/ssh_host_*
 # utilizador
 in_t groupadd -f autologin
 if in_t getent passwd "$USERNAME" >/dev/null; then in_t userdel -r "$USERNAME" || true; fi
-in_t useradd -m -c "$FULLNAME" -G wheel,video,audio,input,users -s /bin/bash "$USERNAME"
+in_t useradd -m -c "$FULLNAME" -G wheel,video,audio,input,users,lpadmin -s /bin/bash "$USERNAME"
 printf '%s:%s\n' "$USERNAME" "$PASSWORD" | in_t chpasswd
 in_t passwd -l root >/dev/null      # root bloqueado: administra-se com sudo (grupo wheel)
 log "user $USERNAME created"

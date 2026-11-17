@@ -115,6 +115,32 @@ def niri_update(**kw):
 
 
 # ------------------------------------------------------------------ janela
+def gpu_summary():
+    """Placas gráficas e o driver que cada uma está a usar (amdgpu, i915/xe, nvidia, nouveau...)."""
+    vendors = {"0x1002": "AMD", "0x8086": "Intel", "0x10de": "NVIDIA", "0x1af4": "Virtual machine"}
+    out = []
+    for card in sorted(os.listdir("/sys/class/drm")):
+        if not re.fullmatch(r"card\d+", card):
+            continue
+        dev = f"/sys/class/drm/{card}/device"
+        try:
+            vendor = open(f"{dev}/vendor").read().strip()
+            driver = os.path.basename(os.readlink(f"{dev}/driver"))
+        except OSError:
+            continue
+        if driver == "nvidia":
+            try:
+                driver += " " + open("/sys/module/nvidia/version").read().strip()
+            except OSError:
+                pass
+        elif driver == "nouveau":
+            driver += " + NVK"
+        elif driver == "virtio-pci":
+            driver = "virtio-gpu"
+        out.append(f"{vendors.get(vendor, 'GPU')} · {driver}")
+    return ", ".join(out) or "No GPU driver loaded"
+
+
 class Settings(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Settings")
@@ -128,6 +154,7 @@ class Settings(Adw.ApplicationWindow):
             ("sound", "Sound", "audio-volume-high-symbolic", self.page_sound),
             ("network", "Network", "network-wireless-symbolic", self.page_network),
             ("bluetooth", "Bluetooth", "bluetooth-active-symbolic", self.page_bluetooth),
+            ("printers", "Printers", "printer-symbolic", self.page_printers),
             ("power", "Power", "battery-good-symbolic", self.page_power),
             ("gaming", "Gaming", "input-gaming-symbolic", self.page_gaming),
             ("keyboard", "Keyboard", "input-keyboard-symbolic", self.page_keyboard),
@@ -415,6 +442,15 @@ class Settings(Adw.ApplicationWindow):
         adv.connect("activated", lambda *_: subprocess.Popen(["nm-connection-editor"]))
         gw.add(adv)
         page.add(gw)
+        gf = Adw.PreferencesGroup(title="Firewall")
+        fw_on = run(["systemctl", "is-active", "nftables"]).strip() == "active"
+        fr = Adw.ActionRow(title="Firewall " + ("on" if fw_on else "off"),
+                           subtitle="Blocks connections from other computers; printers, Steam Remote Play and "
+                                    "network discovery still work" if fw_on
+                           else "Turn it on with: sudo systemctl enable --now nftables")
+        fr.add_prefix(Gtk.Image.new_from_icon_name("security-high-symbolic" if fw_on else "security-low-symbolic"))
+        gf.add(fr)
+        page.add(gf)
         self.scan_wifi()
         return page
 
@@ -651,7 +687,166 @@ class Settings(Adw.ApplicationWindow):
             row.add_suffix(sc)
             gl.add(row)
             page.add(gl)
+
+        # bloqueio quando o PC fica parado (nexora-idle + swayidle; não bloqueia a meio de jogos/vídeos)
+        gi = Adw.PreferencesGroup(title="When idle",
+                                  description="Never happens while a game or a video is playing")
+        try:
+            lock, off = (int(x) for x in read_conf("idle", "300 600").split()[:2])
+        except ValueError:
+            lock, off = 300, 600
+        times = [0, 60, 120, 300, 600, 900, 1800]
+        labels = ["Never", "1 minute", "2 minutes", "5 minutes", "10 minutes", "15 minutes", "30 minutes"]
+        self.idle_rows = {}
+        for key, title, val in (("lock", "Lock the screen after", lock), ("off", "Turn the screen off after", off)):
+            r = Adw.ComboRow(title=title, model=Gtk.StringList.new(labels))
+            r.set_selected(times.index(val) if val in times else 3)
+            r.connect("notify::selected", lambda *_: self.idle_save(times))
+            self.idle_rows[key] = r
+            gi.add(r)
+        lk = Adw.ActionRow(title="Lock now", activatable=True)
+        lk.add_suffix(Gtk.Image.new_from_icon_name("system-lock-screen-symbolic"))
+        lk.connect("activated", lambda *_: subprocess.Popen(["nexora-idle", "lock-now"]))
+        gi.add(lk)
+        page.add(gi)
         return page
+
+    def idle_save(self, times):
+        write_conf("idle", f"{times[self.idle_rows['lock'].get_selected()]} "
+                           f"{times[self.idle_rows['off'].get_selected()]}")
+        subprocess.Popen(["nexora-idle", "start"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+
+    # -------------------------------------------------------------- Impressoras (CUPS)
+    def page_printers(self):
+        page = self.prefs_page()
+        self.pr_group = Adw.PreferencesGroup(title="Printers",
+                                             description="Network printers appear here by themselves")
+        rf = Gtk.Button(icon_name="view-refresh-symbolic", valign=Gtk.Align.CENTER, css_classes=["flat"],
+                        tooltip_text="Refresh")
+        rf.connect("clicked", lambda *_: self.pr_refresh())
+        self.pr_group.set_header_suffix(rf)
+        page.add(self.pr_group)
+        self.pr_found = Adw.PreferencesGroup(title="Add a printer",
+                                             description="Turn the printer on and connect it by USB or to the same network")
+        self.pr_scan_btn = Gtk.Button(label="Search", valign=Gtk.Align.CENTER, css_classes=["flat"])
+        self.pr_scan_btn.connect("clicked", lambda *_: self.pr_scan())
+        self.pr_found.set_header_suffix(self.pr_scan_btn)
+        page.add(self.pr_found)
+        ga = Adw.PreferencesGroup()
+        adv = Adw.ActionRow(title="Advanced printer settings", subtitle="CUPS web page: drivers, queues, jobs",
+                            activatable=True)
+        adv.add_suffix(Gtk.Image.new_from_icon_name("go-next-symbolic"))
+        adv.connect("activated", lambda *_: subprocess.Popen(["xdg-open", "http://localhost:631/"]))
+        ga.add(adv)
+        page.add(ga)
+        self.pr_rows, self.pr_found_rows = [], []
+        self.pr_refresh()
+        return page
+
+    def pr_list(self):
+        """[(nome, estado, é a predefinida)]"""
+        default = run(["lpstat", "-d"]).partition(":")[2].strip()
+        states = {}
+        for line in run(["lpstat", "-p"]).splitlines():
+            m = re.match(r"printer (\S+) (?:is )?(.*?)\.", line)
+            if m:
+                states[m.group(1)] = m.group(2)
+        names = [n for n in run(["lpstat", "-e"]).split() if n]
+        return [(n, states.get(n, "ready"), n == default) for n in names]
+
+    def pr_refresh(self):
+        threading.Thread(target=lambda: GLib.idle_add(self.pr_fill, self.pr_list()), daemon=True).start()
+
+    def pr_fill(self, printers):
+        for r in self.pr_rows:
+            self.pr_group.remove(r)
+        self.pr_rows = []
+        for name, state, default in printers:
+            row = Adw.ActionRow(title=name.replace("_", " "),
+                                subtitle=("Default · " if default else "") + state.capitalize())
+            row.add_prefix(Gtk.Image.new_from_icon_name("printer-symbolic"))
+            tp = Gtk.Button(label="Test page", valign=Gtk.Align.CENTER)
+            tp.connect("clicked", lambda _b, n=name: self.pr_do(
+                ["lp", "-d", n, "/usr/share/cups/data/testprint"], "Test page sent"))
+            row.add_suffix(tp)
+            if not default:
+                df = Gtk.Button(icon_name="emblem-default-symbolic", valign=Gtk.Align.CENTER, css_classes=["flat"],
+                                tooltip_text="Make default")
+                df.connect("clicked", lambda _b, n=name: self.pr_do(["lpoptions", "-d", n], "Default printer set"))
+                row.add_suffix(df)
+            rm = Gtk.Button(icon_name="user-trash-symbolic", valign=Gtk.Align.CENTER, css_classes=["flat"],
+                            tooltip_text="Remove printer")
+            rm.connect("clicked", lambda _b, n=name: self.pr_do(["lpadmin", "-x", n], "Printer removed"))
+            row.add_suffix(rm)
+            self.pr_group.add(row)
+            self.pr_rows.append(row)
+        if not printers:
+            row = Adw.ActionRow(title="No printers yet", subtitle="Search below to add one")
+            self.pr_group.add(row)
+            self.pr_rows.append(row)
+        return False
+
+    def pr_do(self, cmd, ok_msg):
+        def work():
+            try:
+                p = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                ok = p.returncode == 0
+            except Exception:  # noqa: BLE001
+                ok = False
+            GLib.idle_add(self.toast, ok_msg if ok else "Didn't work — try the advanced settings")
+            GLib.idle_add(self.pr_refresh)
+        threading.Thread(target=work, daemon=True).start()
+
+    def pr_scan(self):
+        self.toast("Looking for printers…")
+        self.pr_scan_btn.set_sensitive(False)
+
+        def work():
+            out = run(["lpinfo", "--timeout", "8", "--include-schemes", "usb,dnssd,ipp,ipps", "-l", "-v"], 25)
+            found, cur = [], {}
+            for line in out.splitlines():
+                line = line.strip()
+                if line.startswith("Device: uri = "):
+                    if cur:
+                        found.append(cur)
+                    cur = {"uri": line.split("=", 1)[1].strip()}
+                elif "=" in line and cur:
+                    k, v = (x.strip() for x in line.split("=", 1))
+                    cur[k] = v
+            if cur:
+                found.append(cur)
+            found = [f for f in found if "://" in f["uri"]]
+            GLib.idle_add(self.pr_fill_found, found)
+        threading.Thread(target=work, daemon=True).start()
+
+    def pr_fill_found(self, found):
+        self.pr_scan_btn.set_sensitive(True)
+        for r in self.pr_found_rows:
+            self.pr_found.remove(r)
+        self.pr_found_rows = []
+        for f in found:
+            title = f.get("info") or f.get("make-and-model") or f["uri"]
+            how = "USB" if f["uri"].startswith("usb:") else "Network"
+            row = Adw.ActionRow(title=title, subtitle=f"{how} · {f.get('make-and-model', '')}".rstrip(" ·"),
+                                activatable=True)
+            row.add_prefix(Gtk.Image.new_from_icon_name("printer-symbolic"))
+            row.add_suffix(Gtk.Image.new_from_icon_name("list-add-symbolic"))
+            row.connect("activated", lambda _r, ff=f, t=title: self.pr_add(ff, t))
+            self.pr_found.add(row)
+            self.pr_found_rows.append(row)
+        if not found:
+            row = Adw.ActionRow(title="No printers found", subtitle="Check that it is on and connected")
+            self.pr_found.add(row)
+            self.pr_found_rows.append(row)
+        return False
+
+    def pr_add(self, f, title):
+        # driverless (IPP Everywhere / AirPrint): serve para quase todas as impressoras dos últimos 10 anos
+        name = re.sub(r"[^A-Za-z0-9_-]+", "_", title).strip("_")[:120] or "Printer"
+        self.toast(f"Adding {title}…")
+        self.pr_do(["lpadmin", "-p", name, "-E", "-v", f["uri"], "-m", "everywhere"], f"{title} is ready")
+
 
     # -------------------------------------------------------------- Jogos (Flatpak + GameMode + kernel)
     GAMES = [  # (id Flatpak, nome, descrição)
@@ -692,6 +887,7 @@ class Settings(Adw.ApplicationWindow):
                                   description="Tip: in Steam, set a game's launch options to  gamemoderun %command%")
         sched = "BORE (CachyOS)" if os.path.exists("/proc/sys/kernel/sched_bore") else "EEVDF"
         items = (("Kernel", f"{os.uname().release} · scheduler {sched}"),
+                 ("Graphics", gpu_summary()),
                  ("NTSYNC", "Ready — faster Windows games in Proton/Wine" if os.path.exists("/dev/ntsync")
                   else "Not available"),
                  ("GameMode", "Ready — boosts the CPU while you play" if shutil.which("gamemoded")
