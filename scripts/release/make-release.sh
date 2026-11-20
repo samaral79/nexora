@@ -61,6 +61,9 @@ mount --bind /dev $M/dev; mount -t devpts devpts $M/dev/pts
 mount -t proc proc $M/proc; mount -t sysfs sysfs $M/sys; mount -t tmpfs tmpfs $M/run
 install -m755 "$PROJ/tools/update/image-setup.sh" $M/run/image-setup.sh
 chroot $M /usr/bin/env -i PATH=/usr/bin:/usr/sbin HOME=/ /bin/bash /run/image-setup.sh "$VER" "$URL"
+# símbolos de depuração fora (só na cópia; o lfs.img fica com eles)
+install -m755 "$PROJ/tools/update/strip-image.py" $M/run/strip-image.py
+chroot $M /usr/bin/env -i PATH=/usr/bin:/usr/sbin HOME=/ /usr/bin/python3 /run/strip-image.py
 if [ -n "$DEVKEY" ]; then
     install -dm700 $M/var/roothome/.ssh
     install -m600 "$PROJ/vm/nexora_ed25519.pub" $M/var/roothome/.ssh/authorized_keys
@@ -88,7 +91,7 @@ OLDK=()
 for k in $(cd $LFS/boot && ls vmlinuz-*-nexora | sort -V | head -n -1); do
     OLDK+=("usr/lib/modules/${k#vmlinuz-}")
 done
-mksquashfs $M $OUT/nexora_$VER.root.raw -noappend -comp zstd -Xcompression-level 15 -b 1M -quiet -progress \
+mksquashfs $M $OUT/nexora_$VER.root.raw -noappend -comp zstd -Xcompression-level 22 -b 1M -quiet -progress \
     -wildcards -e 'sources' 'tools' 'lost+found' 'tmp/*' 'var/tmp/*' 'var/log/journal/*' 'run/*' \
                   'usr/share/doc/*' 'usr/share/gtk-doc/*' 'usr/lib/libLLVM*.a' 'usr/lib/libclang*.a' \
                   "${OLDK[@]}"

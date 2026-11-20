@@ -33,9 +33,11 @@ p_kernel() {
     source $N/kernel-extra.sh
     kcfg_extra
     kcfg_gaming
+    kcfg_perf
     make olddefconfig
     kcfg_check
     kcfg_gaming_check
+    kcfg_perf_check
     local kver
     kver=$(make -s kernelrelease)
     [ "$kver" = 7.3.4-nexora ]

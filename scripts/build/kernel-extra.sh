@@ -102,6 +102,29 @@ kcfg_gaming() {
     $c -e MQ_IOSCHED_DEADLINE -e MQ_IOSCHED_KYBER -e IOSCHED_BFQ
 }
 
+# desempenho geral (fase V): a raiz inteira é uma imagem squashfs, por isso a descompressão
+# tem de correr em todos os núcleos e direto para a cache de páginas; MGLRU para a memória;
+# schedutil por omissão (o acpi-cpufreq ficava preso no governador "userspace")
+kcfg_perf() {
+    local c=scripts/config
+    $c -d SQUASHFS_CHOICE_DECOMP_BY_MOUNT -d SQUASHFS_COMPILE_DECOMP_SINGLE \
+       -d SQUASHFS_COMPILE_DECOMP_MULTI -e SQUASHFS_COMPILE_DECOMP_MULTI_PERCPU \
+       -d SQUASHFS_FILE_CACHE -e SQUASHFS_FILE_DIRECT -e SQUASHFS_LZ4
+    $c -e LRU_GEN -e LRU_GEN_ENABLED -d LRU_GEN_STATS
+    $c -e CPU_FREQ_GOV_SCHEDUTIL -d CPU_FREQ_DEFAULT_GOV_USERSPACE -d CPU_FREQ_DEFAULT_GOV_PERFORMANCE \
+       -d CPU_FREQ_DEFAULT_GOV_POWERSAVE -d CPU_FREQ_DEFAULT_GOV_ONDEMAND \
+       -d CPU_FREQ_DEFAULT_GOV_CONSERVATIVE -e CPU_FREQ_DEFAULT_GOV_SCHEDUTIL
+    # /proc/config.gz: saber com que opções o kernel que está a correr foi feito
+    $c -e IKCONFIG -e IKCONFIG_PROC
+}
+kcfg_perf_check() {
+    local o bad=0
+    for o in SQUASHFS_DECOMP_MULTI_PERCPU SQUASHFS_FILE_DIRECT LRU_GEN LRU_GEN_ENABLED \
+             CPU_FREQ_DEFAULT_GOV_SCHEDUTIL IKCONFIG_PROC; do
+        grep -qE "^CONFIG_$o=y$" .config || { echo "CONFIG_$o não ficou ligado"; bad=1; }
+    done
+    return $bad
+}
 kcfg_gaming_check() {
     local o bad=0
     for o in CACHY SCHED_BORE HZ_1000 PREEMPT NO_HZ_FULL CC_OPTIMIZE_FOR_PERFORMANCE_O3 \

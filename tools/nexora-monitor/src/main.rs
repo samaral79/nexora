@@ -59,6 +59,7 @@ const PHASES: &[(&str, &str, &str)] = &[
     ("blfs-s", "Nexora · drivers NVIDIA e Intel", "blfs/blfs-s.sh"),
     ("blfs-t", "Nexora · impressoras, firewall e bloqueio", "blfs/blfs-t.sh"),
     ("blfs-u", "Nexora · atualizações A/B", "blfs/blfs-u.sh"),
+    ("blfs-v", "Nexora · desempenho", "blfs/blfs-v.sh"),
 ];
 // fases que correm dentro do chroot (as que o Retomar sabe relançar): tudo menos os caps. 5 e 6
 fn chroot_phase(k: &str) -> bool {
