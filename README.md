@@ -1,85 +1,92 @@
 # Nexora Linux
 
-Distro pessoal feita do zero, primeiro a partir do **Linux From Scratch 13.1 (systemd)** e agora também
-como derivada do **CachyOS**, com o mesmo ambiente de trabalho: o **Nexora Flow** (niri com barra e doca
-próprias), o tema ciano/azul-noite, o instalador gráfico e as afinações para jogos.
+A personal Linux distribution, first built from scratch with **Linux From Scratch 13.1 (systemd)** and now
+also available as a `pacman`-based edition. Both share the same look, graphical installer and gaming tweaks.
 
-## Transferir
+## Download
 
-As ISOs estão nas [releases](https://github.com/samaral79/nexora/releases):
+ISOs are on the [releases](https://github.com/samaral79/nexora/releases) page:
 
-| Edição | O que é | Atualiza com |
+| Edition | What it is | Updates with |
 |---|---|---|
-| **Nexora (base CachyOS)** — a principal | pacotes do CachyOS e do Arch, kernel `linux-cachyos` (BORE), btrfs com snapshots | `pacman` (snapshot antes de cada atualização, escolhido no menu do Limine se algo partir) |
-| **Nexora LFS 13.1** | tudo compilado de raiz por estes scripts, sistema só de leitura | imagens A/B (`systemd-sysupdate`) |
+| **Nexora** — the main edition | binary packages, kernel with the BORE scheduler, btrfs with snapshots | `pacman` (a snapshot is taken before every update; pick an older one in the Limine boot menu if something breaks) |
+| **Nexora LFS 13.1** | everything compiled from source by these scripts, read-only system | A/B system images (`systemd-sysupdate`) |
 
-As duas arrancam em live (Xfce) com o instalador, precisam de UEFI e de um disco com 30 GB ou mais.
-O instalador apaga o disco escolhido.
+Both boot into a live session (Xfce) with the installer. They need UEFI and a disk of 30 GB or more.
+The installer erases the chosen disk.
 
-## O processo, passo a passo
+## The process, step by step
 
-Cada fase é um script; o histórico do git segue a mesma ordem.
+Each phase is one script, and the git history follows the same order.
 
-| Fase | Script | O que junta |
+| Phase | Script | What it adds |
 |---|---|---|
-| Caps. 4–10 do LFS | `scripts/build/` | toolchain, sistema base em terminal, kernel, arranque |
-| A–F | `scripts/blfs/blfs-a.sh` … `blfs-f.sh` | BLFS: rede, PAM, sudo, Xorg, Xfce, Firefox, instalador |
-| G–I | `blfs-g.sh` … `blfs-i.sh` | tema Nexora, Wayland, niri e o Nexora Flow |
-| J–O | `blfs-j.sh` … `blfs-o.sh` | apps GTK4, Flatpak e loja, vídeo, cara nova, acertos |
-| P | `blfs-p.sh` + `tools/aur/` | AUR isolado num contentor Arch (`nexora-aur`) |
-| Q | `blfs-q.sh` | hardware real: portáteis, Bluetooth, som SOF, discos, zram |
-| R | `blfs-r.sh` | jogos: kernel CachyOS + BORE, Mesa completo, GameMode |
-| S–T | `blfs-s.sh`, `blfs-t.sh` | NVIDIA/Intel, impressoras, firewall, bloqueio de ecrã |
-| U | `blfs-u.sh` + `tools/update/` | atualizações por imagem A/B |
-| V | `blfs-v.sh` | desempenho: squashfs em todos os núcleos, MGLRU, schedutil, oomd, TRIM |
-| W | `blfs-w.sh` | microcódigo do CPU, limites da sessão (GameMode, PipeWire), memória |
-| Base CachyOS | `cachy/` | a Nexora como derivada do CachyOS, com `pacman` |
+| LFS chapters 4–10 | `scripts/build/` | toolchain, terminal-only base system, kernel, boot |
+| A–F | `scripts/blfs/blfs-a.sh` … `blfs-f.sh` | BLFS: networking, PAM, sudo, Xorg, Xfce, Firefox, installer |
+| G–I | `blfs-g.sh` … `blfs-i.sh` | Nexora theme, Wayland, niri and the Nexora Flow desktop |
+| J–O | `blfs-j.sh` … `blfs-o.sh` | GTK4 apps, Flatpak and the software store, video, new look, fixes |
+| P | `blfs-p.sh` + `tools/aur/` | AUR in an isolated Arch container (`nexora-aur`) |
+| Q | `blfs-q.sh` | real hardware: laptops, Bluetooth, SOF audio, disks, zram |
+| R | `blfs-r.sh` | gaming: BORE kernel, full Mesa, GameMode |
+| S–T | `blfs-s.sh`, `blfs-t.sh` | NVIDIA/Intel drivers, printers, firewall, screen lock |
+| U | `blfs-u.sh` + `tools/update/` | A/B image updates |
+| V | `blfs-v.sh` | performance: multi-core squashfs, MGLRU, schedutil, systemd-oomd, TRIM |
+| W | `blfs-w.sh` | CPU microcode, session limits (GameMode, PipeWire), memory tuning |
+| pacman edition | `cachy/` | Nexora built from binary packages, with `pacman` |
 
-## Edição CachyOS (`cachy/`)
+## pacman edition (`cachy/`)
 
 ```bash
-./cachy/build.sh            # ISO em cachy-out/ (Docker, contentor cachyos/cachyos)
+./cachy/build.sh            # ISO in cachy-out/ (runs in a Docker container)
 ```
 
-- `cachy/pkgs/`: os pacotes da Nexora — `nexora-base` (marca, firewall, seletor NVIDIA, GameMode),
-  `nexora-flow` (ambiente de trabalho e Definições), `nexora-theme`, `nexora-installer` e `eww`
-  (não está nos repositórios do Arch).
-- `cachy/iso/`: perfil do `mkarchiso`. A imagem vai em squashfs xz com filtro x86 para a ISO caber
-  nos 2 GiB de uma release do GitHub.
-- Instalação: partição EFI de 2 GiB e btrfs (`@`, `@home`, `@root`, `@srv`, `@cache`, `@log`, `@tmp`),
-  Limine, snapper e snap-pac.
+- `cachy/pkgs/`: the Nexora packages — `nexora-base` (branding, firewall, NVIDIA driver selection,
+  GameMode), `nexora-flow` (desktop and Settings app), `nexora-theme`, `nexora-installer` and `eww`.
+- `cachy/iso/`: the `mkarchiso` profile. The system image uses squashfs xz with the x86 filter so the ISO
+  fits within the 2 GiB limit of a GitHub release asset.
+- Installed layout: 2 GiB EFI partition and btrfs (`@`, `@home`, `@root`, `@srv`, `@cache`, `@log`, `@tmp`),
+  with Limine, snapper and snap-pac.
 
-## Edição LFS
+## LFS edition
 
-Compila-se dentro de `lfs.img`, um disco virtual montado em `/mnt/lfs` só durante o build; o sistema
-onde se compila não é tocado.
+Everything is compiled inside `lfs.img`, a virtual disk mounted at `/mnt/lfs` only while building; the host
+system is never touched.
 
-- `scripts/00-host-setup.sh` (sudo): instala as dependências, cria e monta o `lfs.img` e cria o utilizador `lfs`
-- `scripts/01-download.sh`: descarrega as fontes e verifica o md5
-- `scripts/mount.sh` / `scripts/umount.sh` (sudo): montam e desmontam o disco virtual
-- `scripts/build-bg.sh <fase>...` (sudo): compila fases em fundo (`NX_GAMING=1` para compilar enquanto se joga)
-- `scripts/release/make-release.sh` (sudo): gera uma versão em `release/<versão>/`
-- `scripts/iso/build-iso.sh` (sudo): faz a ISO a partir da última versão (`release/LATEST`)
-- `tools/nexora-monitor/`: app (Rust + Slint) que acompanha o build
+- `scripts/00-host-setup.sh` (sudo): installs the dependencies, creates and mounts `lfs.img` and creates the `lfs` user
+- `scripts/01-download.sh`: downloads the sources and checks their md5
+- `scripts/mount.sh` / `scripts/umount.sh` (sudo): mount and unmount the virtual disk
+- `scripts/build-bg.sh <phase>...` (sudo): builds phases in the background (`NX_GAMING=1` to build while gaming)
+- `scripts/release/make-release.sh` (sudo): creates a release in `release/<version>/`
+- `scripts/iso/build-iso.sh` (sudo): builds the ISO from the latest release (`release/LATEST`)
+- `tools/nexora-monitor/`: a Rust + Slint app that follows the build
 
-### Versões e atualizações (A/B)
+### Releases and A/B updates
 
-Cada versão é uma imagem do sistema inteiro, igual para todos:
+Each release is an image of the whole system, identical for everyone:
 
-- `nexora_<versão>.root.raw`: o sistema (squashfs, só de leitura). O mesmo ficheiro serve para o live, para instalar e para atualizar.
-- `nexora_<versão>.efi`: UKI (kernel + microcódigo + initramfs + linha de comando) para o systemd-boot.
-- `SHA256SUMS` + `SHA256SUMS.gpg`: assinados com a chave "Nexora Linux Releases". A pública está em
-  `tools/update/nexora-release.pgp`; a privada nunca entra no repositório.
+- `nexora_<version>.root.raw`: the system (read-only squashfs). The same file is used for the live session, for installing and for updating.
+- `nexora_<version>.efi`: a UKI (kernel + microcode + initramfs + command line) for systemd-boot.
+- `SHA256SUMS` + `SHA256SUMS.gpg`: signed with the "Nexora Linux Releases" key. The public key is
+  `tools/update/nexora-release.pgp`; the private key never goes into the repository.
 
-O disco instalado tem quatro partições: EFI, sistema A, sistema B e `nexora-data` (montada em `/var`). O `/home`,
-o `/root` e o `/usr/local` vivem em `/var`, e o `/etc` é a imagem com as tuas alterações por cima (overlay).
-O `systemd-sysupdate` descarrega a versão nova para a partição livre e o systemd-boot arranca-a no arranque
-seguinte. Se falhar 3 vezes, volta sozinho à versão anterior.
+An installed disk has four partitions: EFI, system A, system B and `nexora-data` (mounted at `/var`). `/home`,
+`/root` and `/usr/local` live in `/var`, and `/etc` is the image with your changes on top (overlay).
+`systemd-sysupdate` downloads the new release to the free partition and systemd-boot starts it on the next boot.
+If it fails to boot 3 times, the previous release comes back automatically.
 
-Versões e ISOs de teste (`--dev-key`) levam uma chave SSH de desenvolvimento e **nunca se publicam**.
+Test releases and ISOs (`--dev-key`) carry a development SSH key and are **never published**.
 
-## Licença
+## Credits
 
-Os scripts, as ferramentas e os pacotes da Nexora estão sob a
-[GNU GPL v3 ou posterior](LICENSE) (GPL-3.0-or-later). O software que os scripts descarregam e compilam
-(LFS/BLFS, CachyOS, Arch e os restantes projetos) mantém as licenças dos respetivos autores.
+Nexora stands on the work of [Linux From Scratch / Beyond LFS](https://www.linuxfromscratch.org/),
+[CachyOS](https://cachyos.org/) (kernel, settings and package repositories of the `pacman` edition),
+[Arch Linux](https://archlinux.org/) (`pacman`, `archiso`), [niri](https://github.com/YaLTeR/niri),
+[eww](https://github.com/elkowar/eww), the [Colloid](https://github.com/vinceliuice/Colloid-gtk-theme) GTK theme,
+[Papirus](https://github.com/PapirusDevelopmentTeam/papirus-icon-theme) icons and
+[Bibata](https://github.com/ful1e5/Bibata_Cursor) cursors.
+
+## License
+
+The Nexora scripts, tools and packages are licensed under the
+[GNU GPL v3 or later](LICENSE) (GPL-3.0-or-later). The software these scripts download and build
+(LFS/BLFS, CachyOS, Arch and all other projects) keeps the licenses of its authors.
