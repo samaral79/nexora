@@ -77,8 +77,12 @@ def list_disks():
         return []
     live = ""
     try:
-        src = subprocess.run(["findmnt", "-no", "SOURCE", "/run/live/medium"], capture_output=True,
-                             text=True).stdout.strip()
+        src = ""
+        for medium in ("/run/archiso/bootmnt", "/run/live/medium"):   # CachyOS (archiso) ou LFS
+            src = subprocess.run(["findmnt", "-no", "SOURCE", medium], capture_output=True,
+                                 text=True).stdout.strip()
+            if src:
+                break
         if src:
             pk = subprocess.run(["lsblk", "-no", "PKNAME", src], capture_output=True, text=True).stdout.split()
             live = "/dev/" + pk[0] if pk and pk[0] else src

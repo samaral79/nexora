@@ -1,0 +1,25 @@
+#!/bin/bash
+# Prepara a sessão live da Nexora no arranque (só no live; o instalador não a copia).
+set -u
+U=nexora
+getent group autologin >/dev/null || groupadd -r autologin
+getent passwd $U >/dev/null ||
+    useradd -m -c "Nexora Live" -G wheel,video,audio,input,users,autologin -s /bin/bash $U
+passwd -d $U >/dev/null
+echo "$U ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/90-nexora-live
+chmod 440 /etc/sudoers.d/90-nexora-live
+mkdir -p /etc/lightdm/lightdm.conf.d
+cat > /etc/lightdm/lightdm.conf.d/60-nexora-live.conf << CONF
+[Seat:*]
+autologin-user=$U
+autologin-user-timeout=0
+autologin-session=xfce
+CONF
+# instalador: no menu, no ambiente de trabalho e a abrir sozinho
+H=/home/$U
+install -m644 /usr/lib/nexora/nexora-installer.desktop /usr/share/applications/nexora-installer.desktop
+install -dm755 $H/Desktop $H/.config/autostart
+install -m755 /usr/lib/nexora/nexora-installer.desktop $H/Desktop/nexora-installer.desktop
+install -m644 /usr/lib/nexora/nexora-installer.desktop $H/.config/autostart/nexora-installer.desktop
+chown -R $U:$U $H
+exit 0

@@ -1,0 +1,17 @@
+# Instalador da Nexora (base CachyOS): a janela GTK é a mesma da Nexora LFS, o motor é novo
+# (btrfs + snapper + Limine). Só aparece no live (o live-setup põe-no no menu).
+pkgname=nexora-installer
+pkgver=2026.11.20
+pkgrel=1
+pkgdesc="Nexora Linux: instalador gráfico"
+arch=(any)
+url="https://github.com/samaral79"
+license=(GPL-3.0-or-later)
+depends=(python python-gobject gtk3 arch-install-scripts squashfs-tools btrfs-progs dosfstools
+         util-linux efibootmgr snapper)
+
+package() {
+    install -Dm755 "$startdir/files/nexora-installer" "$pkgdir/usr/bin/nexora-installer"
+    install -Dm755 "$startdir/nexora-install-engine" "$pkgdir/usr/bin/nexora-install-engine"
+    install -Dm644 "$startdir/files/nexora-installer.desktop" "$pkgdir/usr/lib/nexora/nexora-installer.desktop"
+}

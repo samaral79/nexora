@@ -1,0 +1,137 @@
+# Nexora: a marca e as escolhas do sistema por cima do CachyOS.
+#   os-release da Nexora (repõe-se quando o pacote filesystem é atualizado), sudo para o grupo
+#   wheel, firewall (nftables), escolha do driver das NVIDIA no arranque, GameMode e memória para
+#   jogar, aspeto por omissão (GTK, fontes, apps por omissão) e o Xfce com o painel da Nexora.
+pkgname=nexora-base
+pkgver=2026.11.20
+pkgrel=1
+pkgdesc="Nexora Linux: marca, configurações e afinações do sistema"
+arch=(any)
+url="https://github.com/samaral79"
+license=(GPL-3.0-or-later)
+depends=(cachyos-settings nftables gamemode sudo glib2 kmod)
+install=nexora-base.install
+
+package() {
+    local d="$pkgdir"
+    # marca
+    install -Dm644 "$startdir/os-release" "$d/usr/share/nexora/os-release"
+    install -Dm644 /dev/stdin "$d/usr/share/libalpm/hooks/95-nexora-os-release.hook" << "EOF"
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = filesystem
+Target = nexora-base
+
+[Action]
+Description = Nexora: os-release...
+When = PostTransaction
+Exec = /usr/bin/cp -f /usr/share/nexora/os-release /usr/lib/os-release
+EOF
+
+    # sudo para o grupo wheel (o utilizador criado pelo instalador está nele)
+    install -Dm440 /dev/stdin "$d/etc/sudoers.d/10-nexora-wheel" <<< '%wheel ALL=(ALL:ALL) ALL'
+    chmod 750 "$d/etc/sudoers.d"
+
+    # firewall: nada entra sem ser pedido (mDNS e Steam na rede local)
+    install -Dm644 "$startdir/nftables.conf" "$d/usr/share/nexora/nftables.conf"
+    install -Dm644 /dev/stdin "$d/usr/lib/systemd/system/nftables.service.d/nexora.conf" << "EOF"
+[Service]
+RemainAfterExit=yes
+ExecStart=
+ExecStart=/usr/bin/nft -f /usr/share/nexora/nftables.conf
+ExecReload=
+ExecReload=/usr/bin/nft -f /usr/share/nexora/nftables.conf
+EOF
+
+    # NVIDIA: RTX 20 / GTX 16 em diante com o driver NVIDIA, as mais antigas com o nouveau
+    install -Dm755 "$startdir/files/flow/gpu/nexora-gpu-select" "$d/usr/lib/nexora/nexora-gpu-select"
+    sed 's|/usr/libexec/nexora-gpu-select|/usr/lib/nexora/nexora-gpu-select|' \
+        "$startdir/files/flow/gpu/nexora-gpu-select.service" \
+        > "$d/usr/lib/nexora/nexora-gpu-select.service.tmp"
+    install -Dm644 "$d/usr/lib/nexora/nexora-gpu-select.service.tmp" "$d/usr/lib/systemd/system/nexora-gpu-select.service"
+    rm "$d/usr/lib/nexora/nexora-gpu-select.service.tmp"
+    install -Dm644 "$startdir/files/flow/gpu/nvidia-nexora.conf" "$d/usr/lib/modprobe.d/nvidia-nexora.conf"
+    install -Dm644 "$startdir/files/flow/gpu/gpu.conf" "$d/etc/nexora/gpu.conf"
+    install -Dm644 "$startdir/nvidia-open-ids" "$d/usr/share/nexora/nvidia-open-ids"
+    # o nvidia-utils põe o nouveau na lista negra; aqui quem decide é o nexora-gpu-select
+    install -Dm644 /dev/null "$d/etc/modprobe.d/nvidia-utils.conf"
+
+    # jogos: o jogo com nice -10 (GameMode) e menos trabalho de memória em fundo a meio do jogo
+    install -Dm644 /dev/stdin "$d/etc/gamemode.ini" << "EOF"
+; Nexora: valores do sistema. Para mudar, copia para ~/.config/gamemode.ini
+[general]
+renice=10
+ioprio=0
+inhibit_screensaver=1
+desiredgov=performance
+EOF
+    install -Dm644 /dev/stdin "$d/usr/lib/sysctl.d/81-nexora-gaming-mem.conf" << "EOF"
+vm.compaction_proactiveness = 0
+vm.watermark_boost_factor = 0
+EOF
+    install -Dm644 /dev/stdin "$d/etc/security/limits.d/10-nexora-gamemode.conf" <<< '@wheel - nice -10'
+
+    # aspeto por omissão
+    install -Dm644 /dev/stdin "$d/usr/share/glib-2.0/schemas/90_nexora.gschema.override" << "EOF"
+[org.gnome.desktop.interface]
+color-scheme='prefer-dark'
+accent-color='teal'
+gtk-theme='Nexora'
+icon-theme='Papirus-Dark'
+cursor-theme='Bibata-Modern-Classic'
+font-name='Inter 10'
+document-font-name='Inter 10'
+monospace-font-name='JetBrains Mono 10'
+clock-format='24h'
+
+[org.gnome.desktop.wm.preferences]
+button-layout='appmenu:close'
+
+[org.gnome.nautilus.preferences]
+default-folder-viewer='icon-view'
+
+[org.gnome.TextEditor]
+style-scheme='Adwaita-dark'
+restore-session=false
+EOF
+    printf '[Settings]\ngtk-theme-name=Nexora\ngtk-icon-theme-name=Papirus-Dark\ngtk-cursor-theme-name=Bibata-Modern-Classic\ngtk-cursor-theme-size=24\ngtk-font-name=Inter 10\ngtk-application-prefer-dark-theme=1\n' \
+        | install -Dm644 /dev/stdin "$d/etc/gtk-3.0/settings.ini"
+    printf '[Settings]\ngtk-icon-theme-name=Papirus-Dark\ngtk-cursor-theme-name=Bibata-Modern-Classic\ngtk-cursor-theme-size=24\ngtk-font-name=Inter 10\n' \
+        | install -Dm644 /dev/stdin "$d/etc/gtk-4.0/settings.ini"
+    install -Dm644 /dev/stdin "$d/etc/fonts/conf.d/60-nexora-emoji.conf" << "EOF"
+<?xml version="1.0"?>
+<!DOCTYPE fontconfig SYSTEM "urn:fontconfig:fonts.dtd">
+<fontconfig>
+  <alias><family>sans-serif</family><prefer><family>Inter</family><family>Noto Color Emoji</family></prefer></alias>
+  <alias><family>serif</family><prefer><family>DejaVu Serif</family><family>Noto Color Emoji</family></prefer></alias>
+  <alias><family>monospace</family><prefer><family>JetBrains Mono</family><family>Noto Color Emoji</family></prefer></alias>
+  <alias><family>emoji</family><prefer><family>Noto Color Emoji</family></prefer></alias>
+</fontconfig>
+EOF
+    install -Dm644 "$startdir/mimeapps.list" "$d/etc/xdg/mimeapps.list"
+    install -Dm644 /dev/stdin "$d/etc/udisks2/mount_options.conf" << "EOF"
+[defaults]
+ntfs_drivers=ntfs3,ntfs
+ntfs3_defaults=uid=$UID,gid=$GID,windows_names,prealloc
+EOF
+    # agente do polkit (pedidos de senha) nas sessões gráficas
+    install -Dm644 /dev/stdin "$d/etc/xdg/autostart/polkit-gnome-authentication-agent-1.desktop" << "EOF"
+[Desktop Entry]
+Type=Application
+Name=PolicyKit Authentication Agent
+Exec=/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1
+NoDisplay=true
+X-GNOME-AutoRestart=true
+EOF
+
+    # Xfce: painel, doca e tema da Nexora como valores por omissão (/etc/xdg/nexora vem primeiro)
+    install -dm755 "$d/etc/xdg/nexora"
+    cp -r "$startdir/xfce4" "$d/etc/xdg/nexora/"
+    install -Dm644 /dev/stdin "$d/etc/profile.d/nexora-xdg.sh" << "EOF"
+# Nexora: as predefinições da Nexora (Xfce) ganham às dos pacotes
+case ":${XDG_CONFIG_DIRS:-/etc/xdg}:" in *:/etc/xdg/nexora:*) ;; *)
+    export XDG_CONFIG_DIRS="/etc/xdg/nexora:${XDG_CONFIG_DIRS:-/etc/xdg}" ;; esac
+EOF
+}

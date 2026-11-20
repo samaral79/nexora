@@ -1,0 +1,8 @@
+NAME="Nexora Linux"
+PRETTY_NAME="Nexora Linux"
+ID=nexora
+ID_LIKE="cachyos arch"
+BUILD_ID=rolling
+ANSI_COLOR="38;2;34;184;207"
+HOME_URL="https://github.com/samaral79"
+LOGO=nexora

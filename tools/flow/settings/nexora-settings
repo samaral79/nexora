@@ -724,6 +724,8 @@ class Settings(Adw.ApplicationWindow):
         return [int(x) if x.isdigit() else 0 for x in re.split(r"[.]", v or "0")]
 
     def page_updates(self):
+        if shutil.which("pacman"):
+            return self.page_updates_pacman()
         page = self.prefs_page()
         cur = ""
         try:
@@ -850,6 +852,107 @@ class Settings(Adw.ApplicationWindow):
         if not ok:
             self.toast("The update didn't finish — it will try again by itself later")
         self.upd_refresh(online=False)
+        return False
+
+    # ---- Nexora com base CachyOS: pacman (com snapshot antes de cada atualização)
+    def page_updates_pacman(self):
+        page = self.prefs_page()
+        g = Adw.PreferencesGroup(title="Nexora")
+        self.pm_status = Adw.ActionRow(title="Checking for updates…")
+        self.pm_status.add_prefix(Gtk.Image.new_from_icon_name("emblem-system-symbolic"))
+        self.pm_btn = Gtk.Button(label="Update", valign=Gtk.Align.CENTER, visible=False,
+                                 css_classes=["suggested-action"])
+        self.pm_btn.connect("clicked", self.pm_update)
+        self.pm_status.add_suffix(self.pm_btn)
+        self.pm_check = Gtk.Button(icon_name="view-refresh-symbolic", valign=Gtk.Align.CENTER,
+                                   css_classes=["flat"], tooltip_text="Check for updates")
+        self.pm_check.connect("clicked", lambda *_: self.pm_refresh())
+        self.pm_status.add_suffix(self.pm_check)
+        g.add(self.pm_status)
+        self.pm_list = Adw.ExpanderRow(title="Packages", visible=False)
+        g.add(self.pm_list)
+        page.add(g)
+        gi = Adw.PreferencesGroup(title="How updates work")
+        for icon, title, sub in (
+                ("folder-download-symbolic", "From CachyOS and Nexora",
+                 "The whole system updates at once with pacman, like on CachyOS and Arch"),
+                ("edit-undo-symbolic", "Safe",
+                 "A snapshot is taken before every update: if something breaks, pick an older one "
+                 "in the boot menu (Snapshots)"),
+                ("user-home-symbolic", "Your things stay",
+                 "Your files, settings and Flathub apps are not touched")):
+            r = Adw.ActionRow(title=title, subtitle=sub)
+            r.add_prefix(Gtk.Image.new_from_icon_name(icon))
+            gi.add(r)
+        page.add(gi)
+        if os.path.isdir("/run/archiso"):
+            self.pm_status.set_title("Updates are not available here")
+            self.pm_status.set_subtitle("This is the live session; install Nexora to update it")
+            self.pm_check.set_visible(False)
+        else:
+            self.pm_refresh()
+        return page
+
+    def pm_refresh(self):
+        self.pm_check.set_sensitive(False)
+        self.pm_btn.set_visible(False)
+        self.pm_status.set_title("Checking for updates…")
+        self.pm_status.set_subtitle("")
+
+        def work():
+            try:   # checkupdates: 0 = há atualizações, 2 = nenhuma, outro = erro
+                p = subprocess.run(["checkupdates"], capture_output=True, text=True, timeout=180)
+                rc, out = p.returncode, p.stdout
+            except Exception:  # noqa: BLE001
+                rc, out = 1, ""
+            pkgs = [l.split()[0] for l in out.splitlines() if l.strip()]
+            GLib.idle_add(self.pm_show, rc, pkgs)
+        threading.Thread(target=work, daemon=True).start()
+
+    def pm_show(self, rc, pkgs):
+        self.pm_check.set_sensitive(True)
+        for r in getattr(self, "pm_rows", []):
+            self.pm_list.remove(r)
+        self.pm_rows = []
+        if rc == 0 and pkgs:
+            self.pm_status.set_title(f"{len(pkgs)} updates available")
+            self.pm_status.set_subtitle("A snapshot is taken first, so you can go back")
+            self.pm_btn.set_visible(True)
+            self.pm_list.set_visible(True)
+            for name in pkgs[:200]:
+                r = Adw.ActionRow(title=name)
+                self.pm_list.add_row(r)
+                self.pm_rows.append(r)
+        elif rc == 2 or (rc == 0 and not pkgs):
+            self.pm_status.set_title("Nexora is up to date")
+            self.pm_list.set_visible(False)
+        else:
+            self.pm_status.set_title("Couldn't check for updates")
+            self.pm_status.set_subtitle("Check your internet connection and try again")
+            self.pm_list.set_visible(False)
+        return False
+
+    def pm_update(self, *_):
+        self.pm_btn.set_sensitive(False)
+        self.pm_check.set_sensitive(False)
+        self.pm_status.set_title("Updating…")
+        self.pm_status.set_subtitle("You can keep using the computer")
+
+        def work():
+            p = subprocess.run(["pkexec", "pacman", "-Syu", "--noconfirm"], capture_output=True, text=True)
+            out = p.stdout + p.stderr
+            reboot = re.search(r"\b(linux-cachyos\S*|nvidia\S*|mesa|systemd)\b", out) is not None
+            GLib.idle_add(self.pm_done, p.returncode == 0, reboot, out)
+        threading.Thread(target=work, daemon=True).start()
+
+    def pm_done(self, ok, reboot, out):
+        self.pm_btn.set_sensitive(True)
+        if ok:
+            self.toast("Restart to finish the update" if reboot else "Nexora is up to date")
+        else:
+            last = [l for l in out.splitlines() if l.strip()][-1:] or ["unknown error"]
+            self.toast("The update didn't finish: " + last[0][:120])
+        self.pm_refresh()
         return False
 
     # -------------------------------------------------------------- Impressoras (CUPS)

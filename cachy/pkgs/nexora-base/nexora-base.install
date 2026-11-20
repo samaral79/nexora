@@ -1,0 +1,4 @@
+post_install() {
+    cp -f /usr/share/nexora/os-release /usr/lib/os-release
+}
+post_upgrade() { post_install; }

@@ -1,0 +1,12 @@
+[Unit]
+Description=Nexora: sessão live
+Before=display-manager.service systemd-user-sessions.service
+After=systemd-sysusers.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/nexora-live-setup
+
+[Install]
+WantedBy=multi-user.target

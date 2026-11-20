@@ -1,0 +1,60 @@
+# Nexora Flow: o ambiente de trabalho da Nexora (niri com barra e doca em eww, lançador fuzzel,
+# notificações mako, bloqueio swaylock/swayidle) e a app Definições.
+pkgname=nexora-flow
+pkgver=2026.11.20
+pkgrel=1
+pkgdesc="Nexora Flow: ambiente de trabalho da Nexora (niri) e a app Definições"
+arch=(any)
+url="https://github.com/samaral79"
+license=(GPL-3.0-or-later)
+depends=(nexora-base nexora-theme niri xwayland-satellite eww fuzzel mako swaybg swaylock swayidle
+         playerctl brightnessctl libnotify pacman-contrib xdg-user-dirs fastfetch python python-gobject gtk4 libadwaita
+         xdg-desktop-portal-gnome xdg-desktop-portal-gtk polkit-gnome gnome-keyring)
+
+package() {
+    local f="$startdir/files/flow" d="$pkgdir"
+    install -Dm755 -t "$d/usr/bin" "$f/bin/nexora-flow-start" "$f/bin/nexora-flow-niri" \
+        "$f/bin/nexora-flow-status" "$f/bin/nexora-flow-power" "$f/system/nexora-idle" \
+        "$f/settings/nexora-settings"
+    install -Dm644 -t "$d/usr/share/nexora-flow/eww" "$f/eww/eww.yuck" "$f/eww/eww.scss"
+    install -Dm644 "$f/mako.conf" "$d/usr/share/nexora-flow/mako.conf"
+    install -dm755 "$d/usr/share/nexora-flow/icons"
+    install -Dm644 "$f/niri/config.kdl" "$d/etc/niri/config.kdl"
+    install -Dm644 "$f/fuzzel.ini" "$d/etc/xdg/nexora/fuzzel/fuzzel.ini"
+    install -Dm644 "$f/swaylock.conf" "$d/etc/swaylock/config"
+    install -Dm644 "$f/fastfetch/config.jsonc" "$d/etc/xdg/fastfetch/config.jsonc"
+    install -Dm644 "$f/fastfetch/logo.txt" "$d/usr/share/nexora/fastfetch-logo.txt"
+    install -Dm644 "$f/settings/org.nexora.Settings.desktop" "$d/usr/share/applications/org.nexora.Settings.desktop"
+    install -Dm644 "$f/gpu/50-limit-free-buffer-pool-in-wayland-compositors.json" \
+        "$d/etc/nvidia/nvidia-application-profiles-rc.d/50-limit-free-buffer-pool-in-wayland-compositors.json"
+    # sessão no ecrã de login
+    install -Dm644 /dev/stdin "$d/usr/share/wayland-sessions/nexora-flow.desktop" << "EOF"
+[Desktop Entry]
+Name=Nexora Flow (Wayland)
+Comment=The Nexora desktop: windows on a scrolling strip
+Exec=niri-session
+Type=Application
+DesktopNames=niri
+EOF
+    # ecrã de login da Nexora (lightdm-gtk-greeter)
+    install -Dm644 /dev/stdin "$d/usr/share/lightdm/lightdm-gtk-greeter.conf.d/50-nexora.conf" << "EOF"
+[greeter]
+background = /usr/share/backgrounds/nexora/nexora-login.png
+user-background = false
+theme-name = Nexora-Login
+icon-theme-name = Papirus-Dark
+cursor-theme-name = Bibata-Modern-Classic
+cursor-theme-size = 24
+font-name = Inter 11
+default-user-image = /usr/share/icons/hicolor/scalable/apps/nexora.svg
+indicators = ~host;~spacer;~clock;~spacer;~session;~power
+clock-format = %a %d %b  ·  %H:%M
+position = 50%,center 52%,center
+round-user-image = true
+EOF
+    install -Dm644 /dev/stdin "$d/usr/share/lightdm/lightdm.conf.d/50-nexora.conf" << "EOF"
+[Seat:*]
+greeter-session=lightdm-gtk-greeter
+user-session=nexora-flow
+EOF
+}

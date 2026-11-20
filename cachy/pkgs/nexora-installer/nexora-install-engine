@@ -1,0 +1,236 @@
+#!/bin/bash
+# nexora-install-engine — motor do instalador da Nexora (base CachyOS; corre como root, no live).
+#
+# Uso: nexora-install-engine <ficheiro.conf>      (a senha do utilizador chega pelo stdin, 1.ª linha)
+#
+# O .conf define: DISK FULLNAME USERNAME HOSTNAME TIMEZONE LOCALE KEYMAP XKBLAYOUT DESKTOP CONFIRM=yes
+#   DESKTOP: flow (Nexora Flow, niri/Wayland) ou xfce
+# Saída para o instalador gráfico, uma por linha:
+#   STEP <n> <total> <texto>   |   PROGRESS <0-100>   |   LOG <texto>   |   ERROR <texto>   |   DONE
+#
+# Disco (GPT, só UEFI):
+#   1  2 GiB   NEXORA_ESP   EFI, montada em /boot: Limine, kernels e initramfs
+#   2  resto   nexora       btrfs: @ (/), @home, @root, @srv, @cache, @log, @tmp
+# O sistema vem da imagem do live (a mesma que arrancou), o kernel do próprio live, e o arranque
+# fica com o Limine. O snapper tira um snapshot antes de cada atualização do pacman e o Limine
+# mostra-os no menu de arranque: se uma atualização correr mal, arranca-se o snapshot anterior.
+set -euo pipefail
+export LC_ALL=C PATH=/usr/bin:/usr/sbin
+
+MEDIUM=${NEXORA_MEDIUM:-/run/archiso/bootmnt}
+T=/mnt/nexora-target
+OFFLINE=/opt/nexora/offline
+TOTAL=7
+GUID_ESP=C12A7328-F81F-11D2-BA4B-00A0C93EC93B
+GUID_ROOT=4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709     # root x86-64 (Discoverable Partitions)
+BTRFS_OPTS=noatime,compress=zstd:1
+KERNEL=linux-cachyos
+
+say()   { echo "$*"; }
+step()  { say "STEP $1 $TOTAL $2"; }
+prog()  { say "PROGRESS $1"; }
+log()   { say "LOG $*"; }
+fail()  { say "ERROR $*"; cleanup; exit 1; }
+trap 'fail "failed at line $LINENO: $BASH_COMMAND"' ERR
+
+cleanup() {
+    trap - ERR
+    if mountpoint -q $T 2>/dev/null; then umount -R $T 2>/dev/null || umount -Rl $T || true; fi
+}
+
+[ "$EUID" -eq 0 ] || { echo "ERROR must run as root"; exit 1; }
+CONF=${1:?ficheiro de configuração em falta}
+# shellcheck disable=SC1090
+source "$CONF"
+IFS= read -r PASSWORD || true
+
+[ "${CONFIRM:-}" = yes ] || fail "missing CONFIRM=yes"
+[ -b "$DISK" ] || fail "$DISK is not a disk"
+[ -d /sys/firmware/efi ] || fail "this computer started in legacy BIOS mode; Nexora needs UEFI (turn off CSM/Legacy in the firmware settings)"
+[[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || fail "invalid username: $USERNAME"
+[ -n "$PASSWORD" ] || fail "empty password"
+[ -e "/usr/share/zoneinfo/$TIMEZONE" ] || fail "unknown time zone: $TIMEZONE"
+SFS=$(ls "$MEDIUM"/nexora/x86_64/airootfs.sfs 2>/dev/null | head -1)
+[ -n "$SFS" ] || fail "system image not found on the live medium"
+VMLINUZ=$MEDIUM/nexora/boot/x86_64/vmlinuz-$KERNEL
+[ -f "$VMLINUZ" ] || fail "kernel not found on the live medium"
+[ "$(blockdev --getsize64 "$DISK")" -ge $((30 * 1000 ** 3)) ] || fail "$DISK is smaller than 30 GB"
+
+# nunca instalar por cima do próprio live
+LIVEDEV=$(findmnt -no SOURCE "$MEDIUM" 2>/dev/null || true)
+if [ -n "$LIVEDEV" ]; then
+    LIVEDISK=/dev/$(lsblk -no PKNAME "$LIVEDEV" 2>/dev/null | head -1)
+    [ "$LIVEDISK" = /dev/ ] && LIVEDISK=$LIVEDEV
+    [ "$DISK" != "$LIVEDISK" ] && [ "$DISK" != "$LIVEDEV" ] || fail "$DISK is the disk the live session booted from"
+fi
+
+part() { case "$DISK" in *nvme*|*mmcblk*|*loop*) echo "${DISK}p$1" ;; *) echo "${DISK}$1" ;; esac; }
+P1=$(part 1); P2=$(part 2)
+in_t() { arch-chroot $T /usr/bin/env LC_ALL=C "$@"; }
+
+# ---------------------------------------------------------------- 1. partições
+step 1 "Preparing disk $DISK"
+prog 2
+cleanup
+for p in $(lsblk -lnpo NAME "$DISK" | tail -n +2); do umount -l "$p" 2>/dev/null || true; swapoff "$p" 2>/dev/null || true; done
+wipefs -af "$DISK" >/dev/null
+sfdisk -q --wipe always "$DISK" << EOF
+label: gpt
+size=2GiB, type=$GUID_ESP, name="NEXORA_ESP"
+type=$GUID_ROOT, name="nexora"
+EOF
+partx -u "$DISK" 2>/dev/null || true
+udevadm settle 2>/dev/null || true
+for i in $(seq 50); do [ -b "$P2" ] && break; sleep 0.2; done
+[ -b "$P2" ] || fail "the new partitions did not show up"
+log "partitions: EFI $P1, system $P2 (btrfs)"
+prog 4
+
+# ---------------------------------------------------------------- 2. sistemas de ficheiros
+step 2 "Formatting"
+mkfs.vfat -F 32 -n NEXORA_ESP "$P1" >/dev/null
+mkfs.btrfs -f -q -L nexora "$P2"
+mkdir -p $T
+mount "$P2" $T
+for sv in @ @home @root @srv @cache @log @tmp; do btrfs -q subvolume create $T/$sv; done
+umount $T
+mount -o $BTRFS_OPTS,subvol=@ "$P2" $T
+mkdir -p $T/{boot,home,root,srv,var/cache,var/log,var/tmp}
+mount -o $BTRFS_OPTS,subvol=@home  "$P2" $T/home
+mount -o $BTRFS_OPTS,subvol=@root  "$P2" $T/root
+mount -o $BTRFS_OPTS,subvol=@srv   "$P2" $T/srv
+mount -o $BTRFS_OPTS,subvol=@cache "$P2" $T/var/cache
+mount -o $BTRFS_OPTS,subvol=@log   "$P2" $T/var/log
+mount -o $BTRFS_OPTS,subvol=@tmp   "$P2" $T/var/tmp
+log "btrfs subvolumes: @ @home @root @srv @cache @log @tmp"
+prog 6
+
+# ---------------------------------------------------------------- 3. copiar o sistema
+step 3 "Copying Nexora to disk"
+unsquashfs -f -d $T -percentage -xattrs-exclude "^security\.selinux" "$SFS" 2>/tmp/nexora-unsquashfs.log | while read -r pct; do
+    if [[ "$pct" =~ ^[0-9]+$ ]]; then echo "PROGRESS $(( 6 + pct * 60 / 100 ))"; fi
+done
+[ "${PIPESTATUS[0]}" -eq 0 ] || fail "copying the system failed: $(tail -1 /tmp/nexora-unsquashfs.log)"
+chmod 700 $T/root
+chmod 1777 $T/var/tmp
+mount -o umask=0077 "$P1" $T/boot
+log "system copied from $(basename "$SFS")"
+prog 66
+
+# ---------------------------------------------------------------- 4. limpar o que só serve ao live
+step 4 "Preparing the system"
+S=$T/etc/systemd/system
+rm -f $T/etc/mkinitcpio.conf.d/archiso.conf \
+      $S/nexora-live.service $S/multi-user.target.wants/nexora-live.service \
+      $S/pacman-init.service $S/multi-user.target.wants/pacman-init.service \
+      $S/etc-pacman.d-gnupg.mount \
+      $T/etc/systemd/journald.conf.d/volatile-storage.conf \
+      $T/etc/systemd/logind.conf.d/do-not-suspend.conf \
+      $T/etc/systemd/resolved.conf.d/archiso.conf \
+      $T/etc/systemd/system-generators/systemd-gpt-auto-generator \
+      $T/usr/local/bin/nexora-live-setup \
+      $S/systemd-loop@.service
+rm -rf $T/etc/pacman.d/gnupg
+# o kernel do live (o /boot da imagem vem vazio)
+install -Dm644 "$VMLINUZ" $T/boot/vmlinuz-$KERNEL
+genfstab -U $T | grep -v zram > $T/etc/fstab
+log "fstab: $(grep -c '^UUID' $T/etc/fstab) file systems"
+rm -f $T/etc/machine-id
+in_t systemd-machine-id-setup >/dev/null
+grep -qE "^[0-9a-f]{32}$" $T/etc/machine-id || fail "could not create the machine ID"
+in_t pacman-key --init >/dev/null 2>&1
+in_t pacman-key --populate >/dev/null 2>&1
+log "pacman keyring ready"
+prog 72
+
+# ---------------------------------------------------------------- 5. configurar
+step 5 "Configuring the system"
+echo "$HOSTNAME" > $T/etc/hostname
+cat > $T/etc/hosts << EOF
+127.0.0.1 localhost
+127.0.1.1 $HOSTNAME.localdomain $HOSTNAME
+::1       localhost ip6-localhost ip6-loopback
+EOF
+ln -sfn "/usr/share/zoneinfo/$TIMEZONE" $T/etc/localtime
+in_t hwclock --systohc 2>/dev/null || true
+sed -i -e 's/^#\(en_US.UTF-8 UTF-8\)/\1/' -e "s/^#\\(${LOCALE//./\\.} UTF-8\\)/\\1/" $T/etc/locale.gen
+in_t locale-gen >/dev/null
+echo "LANG=$LOCALE" > $T/etc/locale.conf
+printf 'KEYMAP=%s\nFONT=Lat2-Terminus16\n' "$KEYMAP" > $T/etc/vconsole.conf
+mkdir -p $T/etc/X11/xorg.conf.d
+cat > $T/etc/X11/xorg.conf.d/00-keyboard.conf << EOF
+Section "InputClass"
+        Identifier "system-keyboard"
+        MatchIsKeyboard "on"
+        Option "XkbLayout" "$XKBLAYOUT"
+EndSection
+EOF
+# o teclado do Nexora Flow (o niri não lê o xorg.conf.d)
+[ -f $T/etc/niri/config.kdl ] && sed -i "s/^\( *layout\) \"[a-z]*\"/\1 \"$XKBLAYOUT\"/" $T/etc/niri/config.kdl
+
+# ambiente de trabalho por omissão no ecrã de login
+case "${DESKTOP:-flow}" in
+    xfce) SESSION=xfce ;;
+    *)    SESSION=nexora-flow ;;
+esac
+mkdir -p $T/etc/lightdm/lightdm.conf.d
+printf '[Seat:*]\nuser-session=%s\n' "$SESSION" > $T/etc/lightdm/lightdm.conf.d/50-nexora-session.conf
+log "default session: $SESSION"
+
+# utilizador (administrador pelo sudo); o root fica sem senha (não entra com senha)
+in_t useradd -m -c "$FULLNAME" -G wheel,video,audio,input,users -s /bin/bash "$USERNAME"
+printf '%s:%s\n' "$USERNAME" "$PASSWORD" | in_t chpasswd
+in_t passwd -l root >/dev/null
+printf '[Desktop]\nSession=%s\n' "$SESSION" > $T/home/$USERNAME/.dmrc
+in_t chown "$USERNAME:" /home/$USERNAME/.dmrc
+log "user $USERNAME created"
+
+# serviços do sistema instalado (a maior parte já vem ligada na imagem)
+in_t systemctl enable NetworkManager lightdm bluetooth cups avahi-daemon power-profiles-daemon \
+    nftables systemd-oomd systemd-timesyncd nexora-gpu-select fstrim.timer >/dev/null 2>&1 || true
+in_t systemctl set-default graphical.target >/dev/null 2>&1
+prog 80
+
+# ---------------------------------------------------------------- 6. arranque (Limine + snapshots)
+step 6 "Installing the boot loader"
+ROOT_UUID=$(blkid -s UUID -o value "$P2")
+cat > $T/etc/default/limine << EOF
+TARGET_OS_NAME="Nexora Linux"
+ESP_PATH="/boot"
+KERNEL_CMDLINE[default]="root=UUID=$ROOT_UUID rootflags=subvol=@ rw quiet loglevel=3 nowatchdog"
+ENABLE_UKI=no
+ENABLE_LIMINE_FALLBACK=yes
+BOOT_ORDER="*, *fallback, Snapshots"
+MAX_SNAPSHOT_ENTRIES=8
+EOF
+mkdir -p $T/etc/kernel
+echo "root=UUID=$ROOT_UUID rootflags=subvol=@ rw quiet loglevel=3 nowatchdog" > $T/etc/kernel/cmdline
+# snapper para a raiz (o .snapshots fica dentro do @, como o limine-snapper-sync espera)
+in_t snapper --no-dbus -c root create-config / >/dev/null
+sed -i -e 's/^TIMELINE_CREATE=.*/TIMELINE_CREATE="no"/' -e 's/^NUMBER_LIMIT=.*/NUMBER_LIMIT="10"/' \
+       -e 's/^NUMBER_LIMIT_IMPORTANT=.*/NUMBER_LIMIT_IMPORTANT="5"/' $T/etc/snapper/configs/root
+# Limine: as ferramentas que geram as entradas vêm no live sem estar instaladas (no live não há ESP)
+mkdir -p $T/var/cache/nexora-offline
+cp "$OFFLINE"/*.pkg.tar.zst $T/var/cache/nexora-offline/
+in_t sh -c 'yes | pacman -U --noconfirm --needed /var/cache/nexora-offline/*.pkg.tar.zst' >/dev/null 2>&1 ||
+    fail "installing the boot loader tools failed"
+rm -rf $T/var/cache/nexora-offline
+if in_t limine-install >/dev/null 2>&1; then
+    log "Limine installed (Nexora entry in the firmware)"
+else
+    in_t limine-install --fallback >/dev/null
+    log "Limine installed (no firmware entry; the disk boots as a removable drive)"
+fi
+in_t limine-install --fallback >/dev/null 2>&1 || true
+in_t /usr/bin/limine-mkinitcpio >/dev/null 2>&1 || fail "creating the boot files failed"
+[ -f $T/boot/limine.conf ] || fail "the boot menu was not created"
+in_t systemctl enable limine-snapper-sync.service snapper-cleanup.timer >/dev/null 2>&1 || true
+log "boot menu created ($(ls $T/boot/*/ 2>/dev/null | grep -c . ) boot files)"
+prog 96
+
+# ---------------------------------------------------------------- 7. fim
+step 7 "Finishing"
+sync
+cleanup
+prog 100
+say DONE

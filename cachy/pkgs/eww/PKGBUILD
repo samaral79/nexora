@@ -1,0 +1,31 @@
+# eww (ElKowar's Wacky Widgets): a barra e a doca do Nexora Flow. Não está nos repositórios
+# do Arch/CachyOS (só no AUR), por isso vai no repositório da Nexora.
+pkgname=eww
+pkgver=0.6.0
+pkgrel=1
+pkgdesc="Widgets para compositores Wayland/X11 (barra e doca do Nexora Flow)"
+arch=(x86_64)
+url="https://github.com/elkowar/eww"
+license=(MIT)
+depends=(gtk3 gtk-layer-shell libdbusmenu-gtk3 gcc-libs glibc)
+makedepends=(cargo)
+options=(!lto)
+
+prepare() {
+    tar -xf "$startdir/files/eww-$pkgver.tar.gz" -C "$srcdir"
+    cd "$srcdir/eww-$pkgver"
+    # o Cargo.lock do 0.6.0 fixa time 0.3.34, que não compila com Rust >= 1.80
+    cargo update -p time@0.3.34
+    cargo fetch --target "$(rustc -vV | sed -n 's/host: //p')"
+}
+
+build() {
+    cd "$srcdir/eww-$pkgver"
+    cargo build --frozen --release
+}
+
+package() {
+    cd "$srcdir/eww-$pkgver"
+    install -Dm755 target/release/eww "$pkgdir/usr/bin/eww"
+    install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

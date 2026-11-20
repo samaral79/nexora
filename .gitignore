@@ -8,3 +8,6 @@ sources-blfs/
 vm/
 /release/
 /release-work/
+/cachy-cache/
+/cachy-out/
+/cachy-build.log

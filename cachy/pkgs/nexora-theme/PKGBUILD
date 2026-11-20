@@ -1,0 +1,89 @@
+# Nexora: tema GTK "Nexora" (Colloid em ciano e azul-noite), ecrã de login, cursor Bibata,
+# pastas ciano do Papirus, fundos e logótipo. As fontes vêm do sources-blfs (container-build.sh).
+pkgname=nexora-theme
+pkgver=2026.11.20
+pkgrel=1
+pkgdesc="Nexora Linux: tema GTK, ecrã de login, cursor, ícones e fundos"
+arch=(any)
+url="https://github.com/samaral79"
+license=(GPL-3.0-or-later)
+depends=(papirus-icon-theme inter-font ttf-jetbrains-mono noto-fonts noto-fonts-emoji ttf-dejavu)
+makedepends=(sassc)
+install=nexora-theme.install
+ACCENT='#22b8cf'
+_colloid=Colloid-gtk-theme-2026-08-08
+_bibata=Bibata-Modern-Classic-2.0.7
+_pfolders=papirus-folders-1.14.0
+
+prepare() {
+    tar -xf "$startdir/files/$_colloid.tar.gz" -C "$srcdir"
+    tar -xf "$startdir/files/$_bibata.tar.xz" -C "$srcdir"
+    tar -xf "$startdir/files/$_pfolders.tar.gz" -C "$srcdir"
+    cd "$srcdir/$_colloid"
+    # acento teal -> ciano Nexora; cinzentos escuros -> azul-noite
+    sed -i -e "s/^\$teal-light: .*/\$teal-light: $ACCENT;/" -e 's/^\$teal-dark: .*/$teal-dark: #1497ab;/' \
+        -e 's/^\$grey-550: .*/$grey-550: #4a5a6a;/' -e 's/^\$grey-600: .*/$grey-600: #3a4856;/' \
+        -e 's/^\$grey-650: .*/$grey-650: #263442;/' -e 's/^\$grey-700: .*/$grey-700: #1a2530;/' \
+        -e 's/^\$grey-750: .*/$grey-750: #151f29;/' -e 's/^\$grey-800: .*/$grey-800: #111a23;/' \
+        -e 's/^\$grey-850: .*/$grey-850: #0d151d;/' -e 's/^\$grey-900: .*/$grey-900: #0a1118;/' \
+        -e 's/^\$grey-950: .*/$grey-950: #050a0f;/' \
+        src/sass/_color-palette-default.scss
+}
+
+package() {
+    local t="$pkgdir/usr/share/themes" s
+    install -dm755 "$t"
+    cd "$srcdir/$_colloid"
+    ./install.sh -d "$t" -n Nexora-Colloid -t teal -c dark --tweaks rimless
+    cd "$t"
+    for s in "" -hdpi -xhdpi; do
+        [ -d Nexora-Colloid-Teal-Dark$s ] && mv Nexora-Colloid-Teal-Dark$s Nexora$s
+    done
+    rm -rf Nexora-Colloid*
+    sed -i -e 's/^Name=.*/Name=Nexora/' -e 's/^GtkTheme=.*/GtkTheme=Nexora/' \
+        -e 's/^MetacityTheme=.*/MetacityTheme=Nexora/' Nexora/index.theme
+    # doca do Xfce em cápsula (painel transparente, a caixa do docklike é que tem fundo)
+    for f in Nexora/gtk-3.0/gtk.css Nexora/gtk-3.0/gtk-dark.css; do
+        cat >> $f << "EOF"
+
+/* --- Nexora: painel e doca --- */
+#docklike-plugin { background-color: rgba(16, 26, 38, 0.80); border-radius: 18px; padding: 4px 8px;
+                   margin-bottom: 6px; border: 1px solid rgba(255, 255, 255, 0.08); }
+#docklike-plugin button { border-radius: 12px; }
+#whiskermenu-button { padding: 0 10px; }
+EOF
+    done
+    # ecrã de login: o Nexora escuro com cartão de vidro
+    install -Dm644 "$startdir/files/login-gtk.css" "$t/Nexora-Login/gtk-3.0/gtk.css"
+    printf '[Desktop Entry]\nType=X-GNOME-Metatheme\nName=Nexora-Login\nComment=Nexora login screen\n' \
+        > "$t/Nexora-Login/index.theme"
+
+    # cursor
+    install -dm755 "$pkgdir/usr/share/icons"
+    cp -a "$srcdir/Bibata-Modern-Classic" "$pkgdir/usr/share/icons/"
+    # pastas ciano do Papirus (aplicadas pelo hook do pacman, o Papirus é de outro pacote)
+    install -Dm755 "$srcdir/$_pfolders/papirus-folders" "$pkgdir/usr/lib/nexora/papirus-folders"
+    install -Dm644 /dev/stdin "$pkgdir/usr/share/libalpm/hooks/90-nexora-papirus-folders.hook" << "EOF"
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = papirus-icon-theme
+Target = nexora-theme
+
+[Action]
+Description = Nexora: pastas ciano no Papirus...
+When = PostTransaction
+Exec = /bin/sh -c '/usr/lib/nexora/papirus-folders -C cyan --theme Papirus-Dark -o >/dev/null 2>&1; /usr/lib/nexora/papirus-folders -C cyan --theme Papirus -o >/dev/null 2>&1; true'
+EOF
+
+    # fundos e logótipo
+    local b="$pkgdir/usr/share/backgrounds/nexora"
+    install -dm755 "$b"
+    install -m644 "$startdir/files/nexora-aurora.png" "$b/nexora-aurora.png"
+    install -m644 "$startdir/files/nexora-wallpaper.png" "$b/nexora-logo.png"
+    install -m644 "$startdir"/files/wallpapers/*.png "$b/"
+    ln -s nexora-aurora.png "$b/nexora-wallpaper.png"
+    install -Dm644 "$startdir/files/nexora-logo.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/nexora.svg"
+    install -Dm644 "$startdir/files/nexora-logo.svg" "$pkgdir/usr/share/pixmaps/nexora.svg"
+}
