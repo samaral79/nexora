@@ -75,11 +75,12 @@ echo "== 3/5 kernel, initramfs e UKI"
 KERNEL=$(cd $LFS/boot && ls vmlinuz-*-nexora | sort -V | tail -1)
 KVER=${KERNEL#vmlinuz-}
 cp $LFS/boot/$KERNEL $OUT/boot/vmlinuz
-"$PROJ/scripts/iso/mkinitramfs.sh" $M $OUT/boot/initramfs.img
+"$PROJ/scripts/iso/mkinitramfs.sh" $M $OUT/boot/initramfs.img $W/ucode.img
 install -dm755 $M/run/uki
-cp $OUT/boot/vmlinuz $OUT/boot/initramfs.img $M/run/uki/
+cp $OUT/boot/vmlinuz $OUT/boot/initramfs.img $W/ucode.img $M/run/uki/
+# o microcódigo só vai no UKI (sistema instalado); o live arranca sem ele (a ISO não cabe)
 chroot $M /usr/bin/env -i PATH=/usr/bin:/usr/sbin HOME=/ /usr/bin/ukify build \
-    --linux=/run/uki/vmlinuz --initrd=/run/uki/initramfs.img --uname="$KVER" \
+    --linux=/run/uki/vmlinuz --initrd=/run/uki/ucode.img --initrd=/run/uki/initramfs.img --uname="$KVER" \
     --cmdline="root=PARTLABEL=nexora_$VER ro quiet loglevel=3" \
     --os-release=@/usr/lib/os-release --output=/run/uki/nexora_$VER.efi
 cp $M/run/uki/nexora_$VER.efi $OUT/
@@ -94,6 +95,7 @@ done
 mksquashfs $M $OUT/nexora_$VER.root.raw -noappend -comp zstd -Xcompression-level 22 -b 1M -quiet -progress \
     -wildcards -e 'sources' 'tools' 'lost+found' 'tmp/*' 'var/tmp/*' 'var/log/journal/*' 'run/*' \
                   'usr/share/doc/*' 'usr/share/gtk-doc/*' 'usr/lib/libLLVM*.a' 'usr/lib/libclang*.a' \
+                  'usr/lib/firmware/intel-ucode' \
                   "${OLDK[@]}"
 
 echo "== 5/5 SHA256SUMS assinado"

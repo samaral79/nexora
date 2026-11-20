@@ -34,3 +34,15 @@ mknod -m 666 $W/dev/null c 1 3
 
 (cd $W && find . -print0 | cpio --null -o -H newc --owner=0:0 --quiet) | zstd -q -19 -T0 > "$OUT"
 echo "✔ initramfs: $OUT ($(du -h "$OUT" | cut -f1))"
+
+# microcódigo do CPU (AMD e Intel): cpio sem compressão, que tem de vir antes do initramfs
+# (o UKI junta os dois; o kernel aplica-o logo no arranque)
+if [ -n "${3:-}" ]; then
+    U=$(mktemp -d); trap 'rm -rf "$W" "$U"' EXIT
+    mkdir -p $U/kernel/x86/microcode
+    cat "$ROOT"/usr/lib/firmware/amd-ucode/microcode_amd*.bin > $U/kernel/x86/microcode/AuthenticAMD.bin
+    cat "$ROOT"/usr/lib/firmware/intel-ucode/* > $U/kernel/x86/microcode/GenuineIntel.bin
+    [ -s $U/kernel/x86/microcode/AuthenticAMD.bin ] && [ -s $U/kernel/x86/microcode/GenuineIntel.bin ]
+    (cd $U && find . -print0 | sort -z | cpio --null -o -H newc --owner=0:0 --quiet) > "$3"
+    echo "✔ microcódigo: $3 ($(du -h "$3" | cut -f1))"
+fi
