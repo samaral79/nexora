@@ -77,3 +77,9 @@ O `systemd-sysupdate` descarrega a versão nova para a partição livre e o syst
 seguinte. Se falhar 3 vezes, volta sozinho à versão anterior.
 
 Versões e ISOs de teste (`--dev-key`) levam uma chave SSH de desenvolvimento e **nunca se publicam**.
+
+## Licença
+
+Os scripts, as ferramentas e os pacotes da Nexora estão sob a
+[GNU GPL v3 ou posterior](LICENSE) (GPL-3.0-or-later). O software que os scripts descarregam e compilam
+(LFS/BLFS, CachyOS, Arch e os restantes projetos) mantém as licenças dos respetivos autores.
